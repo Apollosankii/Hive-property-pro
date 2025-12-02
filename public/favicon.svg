@@ -1,0 +1,28 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="64" height="64" rx="12" fill="#2563eb"/>
+  
+  <!-- Building 1 (Left) -->
+  <rect x="8" y="20" width="10" height="24" fill="white" rx="1"/>
+  <rect x="10" y="24" width="2.5" height="2.5" fill="#2563eb" rx="0.5"/>
+  <rect x="13.5" y="24" width="2.5" height="2.5" fill="#2563eb" rx="0.5"/>
+  <rect x="10" y="28" width="2.5" height="2.5" fill="#2563eb" rx="0.5"/>
+  <rect x="13.5" y="28" width="2.5" height="2.5" fill="#2563eb" rx="0.5"/>
+  
+  <!-- Building 2 (Center - Tallest) -->
+  <rect x="22" y="12" width="12" height="32" fill="white" rx="1"/>
+  <rect x="24" y="16" width="3" height="3" fill="#2563eb" rx="0.5"/>
+  <rect x="28" y="16" width="3" height="3" fill="#2563eb" rx="0.5"/>
+  <rect x="24" y="21" width="3" height="3" fill="#2563eb" rx="0.5"/>
+  <rect x="28" y="21" width="3" height="3" fill="#2563eb" rx="0.5"/>
+  <rect x="24" y="26" width="3" height="3" fill="#2563eb" rx="0.5"/>
+  <rect x="28" y="26" width="3" height="3" fill="#2563eb" rx="0.5"/>
+  
+  <!-- Building 3 (Right) -->
+  <rect x="38" y="24" width="9" height="20" fill="white" rx="1"/>
+  <rect x="40" y="28" width="2" height="2" fill="#2563eb" rx="0.5"/>
+  <rect x="43" y="28" width="2" height="2" fill="#2563eb" rx="0.5"/>
+  <rect x="40" y="33" width="2" height="2" fill="#2563eb" rx="0.5"/>
+  <rect x="43" y="33" width="2" height="2" fill="#2563eb" rx="0.5"/>
+</svg>
+

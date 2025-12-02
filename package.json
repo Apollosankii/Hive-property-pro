@@ -1,7 +1,7 @@
 {
-  "name": "property-management-pwa",
+  "name": "propmanager",
   "version": "1.0.0",
-  "description": "Property Management & Utility Billing Progressive Web App",
+  "description": "PropManager - Professional Property Management & Utility Billing System",
   "type": "module",
   "private": true,
   "author": "",

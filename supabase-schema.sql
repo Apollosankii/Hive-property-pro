@@ -58,19 +58,28 @@ CREATE TABLE bills (
   water_current_reading DECIMAL(10, 2) NOT NULL DEFAULT 0,
   water_units_consumed DECIMAL(10, 2) GENERATED ALWAYS AS (GREATEST(0, water_current_reading - water_prev_reading)) STORED,
   water_rate DECIMAL(10, 2) NOT NULL DEFAULT 50,
-  water_amount DECIMAL(10, 2) GENERATED ALWAYS AS (water_units_consumed * water_rate) STORED,
+  water_amount DECIMAL(10, 2) GENERATED ALWAYS AS (GREATEST(0, water_current_reading - water_prev_reading) * water_rate) STORED,
   elec_prev_reading DECIMAL(10, 2) NOT NULL DEFAULT 0,
   elec_current_reading DECIMAL(10, 2) NOT NULL DEFAULT 0,
   elec_units_consumed DECIMAL(10, 2) GENERATED ALWAYS AS (GREATEST(0, elec_current_reading - elec_prev_reading)) STORED,
   elec_rate DECIMAL(10, 2) NOT NULL DEFAULT 15,
-  elec_amount DECIMAL(10, 2) GENERATED ALWAYS AS (elec_units_consumed * elec_rate) STORED,
+  elec_amount DECIMAL(10, 2) GENERATED ALWAYS AS (GREATEST(0, elec_current_reading - elec_prev_reading) * elec_rate) STORED,
   rent_amount DECIMAL(10, 2) NOT NULL DEFAULT 0,
   arrears_brought_forward DECIMAL(10, 2) NOT NULL DEFAULT 0,
   total_amount DECIMAL(10, 2) GENERATED ALWAYS AS (
-    water_amount + elec_amount + rent_amount + arrears_brought_forward
+    (GREATEST(0, water_current_reading - water_prev_reading) * water_rate) + 
+    (GREATEST(0, elec_current_reading - elec_prev_reading) * elec_rate) + 
+    rent_amount + 
+    arrears_brought_forward
   ) STORED,
   amount_paid DECIMAL(10, 2) NOT NULL DEFAULT 0,
-  balance DECIMAL(10, 2) GENERATED ALWAYS AS (total_amount - amount_paid) STORED,
+  balance DECIMAL(10, 2) GENERATED ALWAYS AS (
+    (GREATEST(0, water_current_reading - water_prev_reading) * water_rate) + 
+    (GREATEST(0, elec_current_reading - elec_prev_reading) * elec_rate) + 
+    rent_amount + 
+    arrears_brought_forward - 
+    amount_paid
+  ) STORED,
   status bill_status NOT NULL DEFAULT 'pending',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

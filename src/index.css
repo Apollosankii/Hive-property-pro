@@ -1,40 +1,94 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  * {
+    @apply border-border;
+  }
+  
   body {
-    @apply bg-gray-50 text-gray-900 font-sans;
+    @apply bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50 dark:from-zinc-950 dark:via-zinc-900 dark:to-zinc-950 text-slate-900 dark:text-zinc-100 font-sans antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    overflow-x: hidden;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+  
+  #root {
+    @apply min-h-screen;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight text-slate-900 dark:text-zinc-50;
   }
 }
 
 @layer components {
   .btn {
-    @apply px-4 py-2 rounded-lg font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2;
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-md;
   }
   
   .btn-primary {
-    @apply bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500;
+    @apply bg-gradient-to-r from-primary-600 to-primary-700 dark:from-primary-500 dark:to-primary-600 text-white hover:from-primary-700 hover:to-primary-800 dark:hover:from-primary-600 dark:hover:to-primary-700 focus:ring-primary-500 active:scale-[0.98];
   }
   
   .btn-secondary {
-    @apply bg-gray-200 text-gray-900 hover:bg-gray-300 focus:ring-gray-500;
+    @apply bg-white dark:bg-zinc-800 text-slate-700 dark:text-zinc-200 border border-slate-300 dark:border-zinc-700 hover:bg-slate-50 dark:hover:bg-zinc-700 hover:border-slate-400 dark:hover:border-zinc-600 focus:ring-slate-500 dark:focus:ring-zinc-500;
   }
   
   .btn-danger {
-    @apply bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
+    @apply bg-gradient-to-r from-red-600 to-red-700 dark:from-red-500 dark:to-red-600 text-white hover:from-red-700 hover:to-red-800 dark:hover:from-red-600 dark:hover:to-red-700 focus:ring-red-500 active:scale-[0.98];
   }
   
   .btn-ghost {
-    @apply bg-transparent text-gray-700 hover:bg-gray-100 focus:ring-gray-500;
+    @apply bg-transparent text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 focus:ring-slate-500 dark:focus:ring-zinc-500;
   }
   
   .input {
-    @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+    @apply w-full px-4 py-2.5 bg-white dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400 focus:border-primary-500 dark:focus:border-primary-400 transition-all duration-200 placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-slate-900 dark:text-zinc-100;
+  }
+  
+  /* Month/Date input styling for dark mode visibility */
+  input[type="month"],
+  input[type="date"] {
+    color-scheme: light;
+  }
+  
+  .dark input[type="month"],
+  .dark input[type="date"] {
+    color-scheme: dark;
+  }
+  
+  /* Ensure month/date inputs are visible in dark mode */
+  .dark input[type="month"]::-webkit-calendar-picker-indicator,
+  .dark input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+    opacity: 0.8;
+  }
+  
+  .dark input[type="month"]::-webkit-datetime-edit-text,
+  .dark input[type="month"]::-webkit-datetime-edit-month-field,
+  .dark input[type="month"]::-webkit-datetime-edit-day-field,
+  .dark input[type="month"]::-webkit-datetime-edit-year-field,
+  .dark input[type="date"]::-webkit-datetime-edit-text,
+  .dark input[type="date"]::-webkit-datetime-edit-month-field,
+  .dark input[type="date"]::-webkit-datetime-edit-day-field,
+  .dark input[type="date"]::-webkit-datetime-edit-year-field {
+    color: rgb(244 244 245); /* zinc-100 */
+  }
+  
+  .input:disabled {
+    @apply bg-slate-50 dark:bg-zinc-950 cursor-not-allowed;
   }
   
   .card {
-    @apply bg-white rounded-lg shadow-sm border border-gray-200 p-6;
+    @apply bg-white dark:bg-zinc-900 rounded-2xl shadow-sm dark:shadow-black/20 border border-slate-200/80 dark:border-zinc-800/80 p-6 backdrop-blur-sm;
+  }
+  
+  .card-hover {
+    @apply transition-all duration-300 hover:shadow-lg dark:hover:shadow-black/30 hover:border-slate-300 dark:hover:border-zinc-700 hover:-translate-y-0.5;
   }
   
   .table {
@@ -42,54 +96,109 @@
   }
   
   .table th {
-    @apply px-4 py-3 bg-gray-50 font-semibold text-gray-700 border-b border-gray-200;
+    @apply px-2 sm:px-4 py-2 sm:py-3 bg-gradient-to-b from-slate-50 to-slate-100/50 dark:from-zinc-900 dark:to-zinc-950/50 font-semibold text-slate-700 dark:text-zinc-200 text-[10px] sm:text-xs uppercase tracking-wider border-b border-slate-200 dark:border-zinc-800;
   }
   
   .table td {
-    @apply px-4 py-3 border-b border-gray-100;
+    @apply px-2 sm:px-4 py-2 sm:py-3 border-b border-slate-100 dark:border-zinc-800 text-slate-600 dark:text-zinc-300;
+  }
+  
+  .table tbody tr {
+    @apply transition-colors duration-150 hover:bg-slate-50/50 dark:hover:bg-zinc-800/50;
   }
   
   .badge {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+    @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold shadow-sm;
   }
   
   .badge-success {
-    @apply bg-green-100 text-green-800;
+    @apply bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50;
   }
   
   .badge-warning {
-    @apply bg-yellow-100 text-yellow-800;
+    @apply bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50;
   }
   
   .badge-danger {
-    @apply bg-red-100 text-red-800;
+    @apply bg-red-100 dark:bg-red-950/40 text-red-800 dark:text-red-400 border border-red-200 dark:border-red-800/50;
   }
   
   .badge-info {
-    @apply bg-blue-100 text-blue-800;
+    @apply bg-blue-100 dark:bg-blue-950/40 text-blue-800 dark:text-blue-400 border border-blue-200 dark:border-blue-800/50;
+  }
+  
+  .stat-card {
+    @apply card card-hover relative overflow-hidden;
+  }
+  
+  .stat-card::before {
+    @apply absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-primary-100/50 dark:from-primary-900/20 to-transparent rounded-full -mr-16 -mt-16;
+    content: '';
+  }
+  
+  .modal-overlay {
+    @apply fixed inset-0 bg-black/60 dark:bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4;
+  }
+  
+  .modal-content {
+    @apply bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl dark:shadow-black/40 max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-slate-200 dark:border-zinc-800;
+  }
+  
+  .sidebar-link {
+    @apply flex items-center gap-3 px-4 py-3 rounded-xl font-medium text-sm transition-all duration-200;
+  }
+  
+  .sidebar-link-active {
+    @apply bg-gradient-to-r from-primary-50 to-primary-100/50 dark:from-primary-900/40 dark:to-primary-800/30 text-primary-700 dark:text-primary-300 shadow-sm border border-primary-200/50 dark:border-primary-800/50;
+  }
+  
+  .sidebar-link-inactive {
+    @apply text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:text-slate-900 dark:hover:text-zinc-100;
   }
 }
 
 /* Loading skeleton */
 .skeleton {
-  @apply animate-pulse bg-gray-200 rounded;
+  @apply animate-pulse bg-gradient-to-r from-slate-200 via-slate-100 to-slate-200 rounded-lg bg-[length:200%_100%];
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
 }
 
 /* Scrollbar styles */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  @apply bg-gray-100;
+  @apply bg-slate-100 dark:bg-zinc-900 rounded-lg;
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-gray-300 rounded;
+  @apply bg-slate-300 dark:bg-zinc-700 rounded-lg hover:bg-slate-400 dark:hover:bg-zinc-600;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  @apply bg-gray-400;
+/* Custom animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
 }
 

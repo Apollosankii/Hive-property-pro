@@ -12,34 +12,168 @@ export default function Reports() {
       .split('T')[0]
   )
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0])
-  const [reportType, setReportType] = useState<'revenue' | 'arrears' | 'occupancy'>('revenue')
+  const [reportType, setReportType] = useState<'revenue' | 'arrears' | 'occupancy' | 'salaries' | 'expenses' | 'inventory' | 'financial'>('revenue')
 
-  const { data: revenueData } = useQuery({
+  const { data: revenueData, error: revenueError } = useQuery({
     queryKey: ['revenue-report', startDate, endDate],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        console.warn('No session found, queries may fail due to RLS')
+      }
+
+      // Fetch payments first
+      const { data: paymentsData, error: paymentsError } = await supabase
         .from('payments')
-        .select('*, bills(billing_month), units(unit_number, buildings(name)), tenants(name)')
+        .select('*')
         .gte('payment_date', startDate)
         .lte('payment_date', endDate)
         .order('payment_date', { ascending: false })
       
-      const total = data?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0
-      return { payments: data || [], total }
+      if (paymentsError) {
+        console.error('Revenue report query error:', paymentsError)
+        throw paymentsError
+      }
+      
+      if (!paymentsData || paymentsData.length === 0) {
+        console.log('No payments found for revenue report')
+        return { payments: [], total: 0 }
+      }
+      
+      // Fetch related data separately
+      const paymentsWithRelations = await Promise.all(
+        paymentsData.map(async (payment: any) => {
+          const [billRes, unitRes, tenantRes] = await Promise.all([
+            payment.bill_id
+              ? supabase
+                  .from('bills')
+                  .select('billing_month')
+                  .eq('id', payment.bill_id)
+                  .single()
+              : Promise.resolve({ data: null, error: null }),
+            payment.unit_id
+              ? supabase
+                  .from('units')
+                  .select('unit_number, building_id')
+                  .eq('id', payment.unit_id)
+                  .single()
+              : Promise.resolve({ data: null, error: null }),
+            payment.tenant_id
+              ? supabase
+                  .from('tenants')
+                  .select('name')
+                  .eq('id', payment.tenant_id)
+                  .single()
+              : Promise.resolve({ data: null, error: null })
+          ])
+          
+          // Get building name
+          let buildingName = null
+          if (unitRes.data?.building_id) {
+            const { data: buildingData } = await supabase
+              .from('buildings')
+              .select('name')
+              .eq('id', unitRes.data.building_id)
+              .single()
+            
+            buildingName = buildingData?.name || null
+          }
+          
+          return {
+            ...payment,
+            bills: billRes.data ? { billing_month: billRes.data.billing_month } : null,
+            units: unitRes.data ? {
+              unit_number: unitRes.data.unit_number,
+              buildings: buildingName ? { name: buildingName } : null
+            } : null,
+            tenants: tenantRes.data ? { name: tenantRes.data.name } : null
+          }
+        })
+      )
+      
+      const total = paymentsWithRelations.reduce((sum, p) => sum + (p.amount || 0), 0)
+      console.log('Revenue report:', { payments: paymentsWithRelations.length, total })
+      return { payments: paymentsWithRelations, total }
     },
     enabled: reportType === 'revenue',
+    staleTime: 0,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
   })
 
-  const { data: arrearsData } = useQuery({
+  const { data: arrearsData, error: arrearsError } = useQuery({
     queryKey: ['arrears-report'],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        console.warn('No session found, queries may fail due to RLS')
+      }
+
+      // Fetch bills with balance > 0 (unpaid amounts)
+      // Balance is calculated as: total_amount - amount_paid
+      // So if 9000 is paid on a 10000 bill, balance = 1000 (which becomes arrears)
+      const { data: billsData, error: billsError } = await supabase
         .from('bills')
-        .select('*, units(unit_number, buildings(name)), tenants(name, phone)')
+        .select('*')
         .gt('balance', 0)
         .order('balance', { ascending: false })
       
-      const total = data?.reduce((sum, b) => sum + (b.balance || 0), 0) || 0
+      if (billsError) {
+        console.error('Arrears report query error:', billsError)
+        throw billsError
+      }
+      
+      if (!billsData || billsData.length === 0) {
+        console.log('No bills with outstanding balance found')
+        return { bills: [], total: 0, aging: { current: [], '30days': [], '60days': [], '90days': [] } }
+      }
+      
+      console.log(`Found ${billsData.length} bills with outstanding balance`)
+      
+      // Fetch related data separately for each bill
+      const billsWithRelations = await Promise.all(
+        billsData.map(async (bill: any) => {
+          const [unitRes, tenantRes] = await Promise.all([
+            bill.unit_id
+              ? supabase
+                  .from('units')
+                  .select('unit_number, building_id')
+                  .eq('id', bill.unit_id)
+                  .single()
+              : Promise.resolve({ data: null, error: null }),
+            bill.tenant_id
+              ? supabase
+                  .from('tenants')
+                  .select('name, phone')
+                  .eq('id', bill.tenant_id)
+                  .single()
+              : Promise.resolve({ data: null, error: null })
+          ])
+          
+          // Get building name
+          let buildingName = null
+          if (unitRes.data?.building_id) {
+            const { data: buildingData } = await supabase
+              .from('buildings')
+              .select('name')
+              .eq('id', unitRes.data.building_id)
+              .single()
+            
+            buildingName = buildingData?.name || null
+          }
+          
+          return {
+            ...bill,
+            units: unitRes.data ? {
+              unit_number: unitRes.data.unit_number,
+              buildings: buildingName ? { name: buildingName } : null
+            } : null,
+            tenants: tenantRes.data ? { name: tenantRes.data.name, phone: tenantRes.data.phone } : null
+          }
+        })
+      )
+      
+      const total = billsWithRelations.reduce((sum, b) => sum + (b.balance || 0), 0)
       
       // Categorize by age
       const now = new Date()
@@ -50,37 +184,183 @@ export default function Reports() {
         '90days': [] as any[],
       }
 
-      data?.forEach((bill) => {
-        const billDate = new Date(bill.created_at)
-        const daysPast = Math.floor((now.getTime() - billDate.getTime()) / (1000 * 60 * 60 * 24))
+      billsWithRelations.forEach((bill) => {
+        // Use billing_month to calculate days past, not created_at
+        const billMonth = new Date(bill.billing_month)
+        // Calculate days from the end of the billing month
+        const monthEnd = new Date(billMonth.getFullYear(), billMonth.getMonth() + 1, 0)
+        const daysPast = Math.floor((now.getTime() - monthEnd.getTime()) / (1000 * 60 * 60 * 24))
         
-        if (daysPast <= 30) aging.current.push(bill)
-        else if (daysPast <= 60) aging['30days'].push(bill)
-        else if (daysPast <= 90) aging['60days'].push(bill)
-        else aging['90days'].push(bill)
+        console.log(`Bill ${bill.id}: billing_month=${bill.billing_month}, monthEnd=${monthEnd.toISOString()}, daysPast=${daysPast}, balance=${bill.balance}`)
+        
+        if (daysPast <= 0) {
+          aging.current.push(bill)
+        } else if (daysPast <= 30) {
+          aging['30days'].push(bill)
+        } else if (daysPast <= 60) {
+          aging['60days'].push(bill)
+        } else {
+          aging['90days'].push(bill)
+        }
       })
 
-      return { bills: data || [], total, aging }
+      console.log('Arrears aging breakdown:', {
+        current: aging.current.length,
+        '30days': aging['30days'].length,
+        '60days': aging['60days'].length,
+        '90days': aging['90days'].length,
+        total
+      })
+
+      return { bills: billsWithRelations, total, aging }
     },
     enabled: reportType === 'arrears',
+    staleTime: 0,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
   })
 
-  const { data: occupancyData } = useQuery({
+  const { data: occupancyData, error: occupancyError } = useQuery({
     queryKey: ['occupancy-report'],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        console.warn('No session found, queries may fail due to RLS')
+      }
+
+      // Fetch units first
+      const { data: unitsData, error: unitsError } = await supabase
         .from('units')
-        .select('*, buildings(name), tenants(name)')
+        .select('*')
         .order('unit_number')
       
-      const occupied = data?.filter((u) => u.status === 'occupied').length || 0
-      const vacant = data?.filter((u) => u.status === 'vacant').length || 0
-      const total = data?.length || 0
+      if (unitsError) {
+        console.error('Occupancy report query error:', unitsError)
+        throw unitsError
+      }
+      
+      if (!unitsData || unitsData.length === 0) {
+        console.log('No units found for occupancy report')
+        return { units: [], occupied: 0, vacant: 0, total: 0, occupancyRate: '0' }
+      }
+      
+      // Fetch buildings and tenants separately
+      const unitsWithRelations = await Promise.all(
+        unitsData.map(async (unit: any) => {
+          const [buildingRes, tenantRes] = await Promise.all([
+            unit.building_id
+              ? supabase
+                  .from('buildings')
+                  .select('name')
+                  .eq('id', unit.building_id)
+                  .single()
+              : Promise.resolve({ data: null, error: null }),
+            unit.tenant_id
+              ? supabase
+                  .from('tenants')
+                  .select('name')
+                  .eq('id', unit.tenant_id)
+                  .single()
+              : Promise.resolve({ data: null, error: null })
+          ])
+          
+          return {
+            ...unit,
+            buildings: buildingRes.data ? { name: buildingRes.data.name } : null,
+            tenants: tenantRes.data ? { name: tenantRes.data.name } : null
+          }
+        })
+      )
+      
+      const occupied = unitsWithRelations.filter((u) => u.status === 'occupied').length
+      const vacant = unitsWithRelations.filter((u) => u.status === 'vacant').length
+      const total = unitsWithRelations.length
       const occupancyRate = total > 0 ? ((occupied / total) * 100).toFixed(1) : '0'
 
-      return { units: data || [], occupied, vacant, total, occupancyRate }
+      console.log('Occupancy report:', { occupied, vacant, total, occupancyRate })
+      return { units: unitsWithRelations, occupied, vacant, total, occupancyRate }
     },
     enabled: reportType === 'occupancy',
+    staleTime: 0,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
+  })
+
+  // Salaries Report Query
+  const { data: salariesData } = useQuery({
+    queryKey: ['salaries-report', startDate, endDate],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('salaries')
+        .select('*, employees(name, position)')
+        .gte('salary_month', startDate)
+        .lte('salary_month', endDate)
+        .order('salary_month', { ascending: false })
+      
+      if (error) throw error
+      const total = data?.reduce((sum, s) => sum + (s.total_amount || 0), 0) || 0
+      return { salaries: data || [], total }
+    },
+    enabled: reportType === 'salaries',
+    staleTime: 0,
+  })
+
+  // Expenses Report Query
+  const { data: expensesData } = useQuery({
+    queryKey: ['expenses-report', startDate, endDate],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('expenses')
+        .select('*')
+        .gte('expense_date', startDate)
+        .lte('expense_date', endDate)
+        .order('expense_date', { ascending: false })
+      
+      if (error) throw error
+      const total = data?.reduce((sum, e) => sum + (e.amount || 0), 0) || 0
+      return { expenses: data || [], total }
+    },
+    enabled: reportType === 'expenses',
+    staleTime: 0,
+  })
+
+  // Inventory Report Query
+  const { data: inventoryData } = useQuery({
+    queryKey: ['inventory-report'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('inventory')
+        .select('*')
+        .order('item_name')
+      
+      if (error) throw error
+      const totalValue = data?.reduce((sum, i) => sum + (i.total_value || 0), 0) || 0
+      const lowStock = data?.filter(i => i.status === 'low_stock' || i.status === 'out_of_stock') || []
+      return { items: data || [], totalValue, lowStockCount: lowStock.length }
+    },
+    enabled: reportType === 'inventory',
+    staleTime: 0,
+  })
+
+  // Financial Summary Query
+  const { data: financialData } = useQuery({
+    queryKey: ['financial-summary', startDate, endDate],
+    queryFn: async () => {
+      const [revenueRes, expensesRes, salariesRes] = await Promise.all([
+        supabase.from('payments').select('amount').gte('payment_date', startDate).lte('payment_date', endDate),
+        supabase.from('expenses').select('amount').gte('expense_date', startDate).lte('expense_date', endDate),
+        supabase.from('salaries').select('total_amount').gte('salary_month', startDate).lte('salary_month', endDate),
+      ])
+
+      const revenue = revenueRes.data?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0
+      const expenses = expensesRes.data?.reduce((sum, e) => sum + (e.amount || 0), 0) || 0
+      const salaries = salariesRes.data?.reduce((sum, s) => sum + (s.total_amount || 0), 0) || 0
+      const netProfit = revenue - expenses - salaries
+
+      return { revenue, expenses, salaries, netProfit }
+    },
+    enabled: reportType === 'financial',
+    staleTime: 0,
   })
 
   const handleExportExcel = () => {
@@ -118,13 +398,54 @@ export default function Reports() {
         })),
         'occupancy-report'
       )
+    } else if (reportType === 'salaries' && salariesData) {
+      exportToExcel(
+        salariesData.salaries.map((s: any) => ({
+          Month: s.salary_month,
+          Employee: s.employees?.name || 'N/A',
+          Position: s.employees?.position || 'N/A',
+          'Base Salary': s.base_salary,
+          Bonuses: s.bonuses,
+          Deductions: s.deductions,
+          'Total Amount': s.total_amount,
+          'Amount Paid': s.amount_paid,
+          Balance: s.balance,
+          Status: s.status,
+        })),
+        'salaries-report'
+      )
+    } else if (reportType === 'expenses' && expensesData) {
+      exportToExcel(
+        expensesData.expenses.map((e: any) => ({
+          Date: e.expense_date,
+          Description: e.description,
+          Category: e.category,
+          Amount: e.amount,
+          Vendor: e.vendor || 'N/A',
+        })),
+        'expenses-report'
+      )
+    } else if (reportType === 'inventory' && inventoryData) {
+      exportToExcel(
+        inventoryData.items.map((i: any) => ({
+          'Item Name': i.item_name,
+          Category: i.category || 'N/A',
+          Quantity: i.quantity,
+          Unit: i.unit,
+          'Unit Cost': i.unit_cost,
+          'Total Value': i.total_value,
+          Status: i.status,
+          Location: i.location || 'N/A',
+        })),
+        'inventory-report'
+      )
     }
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Reports</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 dark:from-slate-100 dark:to-slate-300 bg-clip-text text-transparent">Reports</h1>
         <div className="flex gap-3">
           <button
             onClick={handleExportExcel}
@@ -142,24 +463,55 @@ export default function Reports() {
             onClick={() => setReportType('revenue')}
             className={`btn ${reportType === 'revenue' ? 'btn-primary' : 'btn-ghost'}`}
           >
-            Revenue Report
+            Revenue
           </button>
           <button
             onClick={() => setReportType('arrears')}
             className={`btn ${reportType === 'arrears' ? 'btn-primary' : 'btn-ghost'}`}
           >
-            Arrears Report
+            Arrears
           </button>
           <button
             onClick={() => setReportType('occupancy')}
             className={`btn ${reportType === 'occupancy' ? 'btn-primary' : 'btn-ghost'}`}
           >
-            Occupancy Report
+            Occupancy
+          </button>
+          <button
+            onClick={() => setReportType('salaries')}
+            className={`btn ${reportType === 'salaries' ? 'btn-primary' : 'btn-ghost'}`}
+          >
+            Salaries
+          </button>
+          <button
+            onClick={() => setReportType('expenses')}
+            className={`btn ${reportType === 'expenses' ? 'btn-primary' : 'btn-ghost'}`}
+          >
+            Expenses
+          </button>
+          <button
+            onClick={() => setReportType('inventory')}
+            className={`btn ${reportType === 'inventory' ? 'btn-primary' : 'btn-ghost'}`}
+          >
+            Inventory
+          </button>
+          <button
+            onClick={() => setReportType('financial')}
+            className={`btn ${reportType === 'financial' ? 'btn-primary' : 'btn-ghost'}`}
+          >
+            Financial Summary
           </button>
         </div>
 
         {reportType === 'revenue' && (
           <div className="space-y-6">
+            {revenueError && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
+                <p className="text-sm font-semibold text-red-900 mb-1">Error loading revenue report</p>
+                <p className="text-sm text-red-700">{revenueError.message || 'Failed to load revenue data. Please check your Supabase configuration.'}</p>
+              </div>
+            )}
+
             <div className="flex items-center gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -229,36 +581,46 @@ export default function Reports() {
 
         {reportType === 'arrears' && (
           <div className="space-y-6">
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-              <p className="text-sm text-red-800 mb-1">Total Outstanding</p>
-              <p className="text-3xl font-bold text-red-900">
+            {arrearsError && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
+                <p className="text-sm font-semibold text-red-900 mb-1">Error loading arrears report</p>
+                <p className="text-sm text-red-700">{arrearsError.message || 'Failed to load arrears data. Please check your Supabase configuration.'}</p>
+              </div>
+            )}
+
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-6">
+              <p className="text-sm text-red-800 dark:text-red-300 mb-1">Total Outstanding</p>
+              <p className="text-3xl font-bold text-red-900 dark:text-red-200">
                 {formatCurrency(arrearsData?.total || 0)}
+              </p>
+              <p className="text-xs text-red-700 dark:text-red-400 mt-2">
+                This is the total unpaid balance across all bills (balance = total_amount - amount_paid)
               </p>
             </div>
 
             {arrearsData && (
               <div className="grid grid-cols-4 gap-4 mb-6">
-                <div className="p-4 bg-blue-50 rounded-lg">
-                  <p className="text-sm text-gray-600">Current</p>
-                  <p className="text-xl font-bold">
+                <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                  <p className="text-sm text-gray-600 dark:text-blue-300">Current</p>
+                  <p className="text-xl font-bold text-slate-900 dark:text-blue-100">
                     {arrearsData.aging.current.length}
                   </p>
                 </div>
-                <div className="p-4 bg-yellow-50 rounded-lg">
-                  <p className="text-sm text-gray-600">1-30 Days</p>
-                  <p className="text-xl font-bold">
+                <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                  <p className="text-sm text-gray-600 dark:text-yellow-300">1-30 Days</p>
+                  <p className="text-xl font-bold text-slate-900 dark:text-yellow-100">
                     {arrearsData.aging['30days'].length}
                   </p>
                 </div>
-                <div className="p-4 bg-orange-50 rounded-lg">
-                  <p className="text-sm text-gray-600">31-60 Days</p>
-                  <p className="text-xl font-bold">
+                <div className="p-4 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg">
+                  <p className="text-sm text-gray-600 dark:text-orange-300">31-60 Days</p>
+                  <p className="text-xl font-bold text-slate-900 dark:text-orange-100">
                     {arrearsData.aging['60days'].length}
                   </p>
                 </div>
-                <div className="p-4 bg-red-50 rounded-lg">
-                  <p className="text-sm text-gray-600">60+ Days</p>
-                  <p className="text-xl font-bold">
+                <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                  <p className="text-sm text-gray-600 dark:text-red-300">60+ Days</p>
+                  <p className="text-xl font-bold text-slate-900 dark:text-red-100">
                     {arrearsData.aging['90days'].length}
                   </p>
                 </div>
@@ -300,24 +662,33 @@ export default function Reports() {
           </div>
         )}
 
-        {reportType === 'occupancy' && occupancyData && (
+        {reportType === 'occupancy' && (
           <div className="space-y-6">
-            <div className="grid grid-cols-3 gap-4 mb-6">
-              <div className="p-4 bg-blue-50 rounded-lg">
-                <p className="text-sm text-gray-600">Total Units</p>
-                <p className="text-3xl font-bold">{occupancyData.total}</p>
+            {occupancyError && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
+                <p className="text-sm font-semibold text-red-900 mb-1">Error loading occupancy report</p>
+                <p className="text-sm text-red-700">{occupancyError.message || 'Failed to load occupancy data. Please check your Supabase configuration.'}</p>
               </div>
-              <div className="p-4 bg-green-50 rounded-lg">
-                <p className="text-sm text-gray-600">Occupied</p>
-                <p className="text-3xl font-bold text-green-600">
-                  {occupancyData.occupied}
-                </p>
-              </div>
-              <div className="p-4 bg-gray-50 rounded-lg">
-                <p className="text-sm text-gray-600">Occupancy Rate</p>
-                <p className="text-3xl font-bold">{occupancyData.occupancyRate}%</p>
-              </div>
-            </div>
+            )}
+
+            {occupancyData && (
+              <>
+                <div className="grid grid-cols-3 gap-4 mb-6">
+                  <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                    <p className="text-sm text-gray-600 dark:text-blue-300">Total Units</p>
+                    <p className="text-3xl font-bold text-slate-900 dark:text-blue-100">{occupancyData.total}</p>
+                  </div>
+                  <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <p className="text-sm text-gray-600 dark:text-green-300">Occupied</p>
+                    <p className="text-3xl font-bold text-green-600 dark:text-green-400">
+                      {occupancyData.occupied}
+                    </p>
+                  </div>
+                  <div className="p-4 bg-gray-50 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700 rounded-lg">
+                    <p className="text-sm text-gray-600 dark:text-zinc-300">Occupancy Rate</p>
+                    <p className="text-3xl font-bold text-slate-900 dark:text-zinc-100">{occupancyData.occupancyRate}%</p>
+                  </div>
+                </div>
 
             <div className="overflow-x-auto">
               <table className="table">
@@ -354,6 +725,223 @@ export default function Reports() {
                   ))}
                 </tbody>
               </table>
+            </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {reportType === 'salaries' && (
+          <div className="space-y-6">
+            <div className="flex items-center gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-zinc-200 mb-2">Start Date</label>
+                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="input" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-zinc-200 mb-2">End Date</label>
+                <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="input" />
+              </div>
+            </div>
+            <div className="bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/50 rounded-lg p-4 mb-6">
+              <p className="text-sm text-blue-800 dark:text-blue-300 mb-1">Total Salaries</p>
+              <p className="text-3xl font-bold text-blue-900 dark:text-blue-200">{formatCurrency(salariesData?.total || 0)}</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Month</th>
+                    <th>Employee</th>
+                    <th>Position</th>
+                    <th>Base Salary</th>
+                    <th>Bonuses</th>
+                    <th>Deductions</th>
+                    <th>Total</th>
+                    <th>Paid</th>
+                    <th>Balance</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {salariesData?.salaries.map((salary: any) => (
+                    <tr key={salary.id}>
+                      <td>{new Date(salary.salary_month).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</td>
+                      <td className="font-medium">{salary.employees?.name || 'N/A'}</td>
+                      <td>{salary.employees?.position || 'N/A'}</td>
+                      <td>{formatCurrency(salary.base_salary)}</td>
+                      <td>{formatCurrency(salary.bonuses)}</td>
+                      <td>{formatCurrency(salary.deductions)}</td>
+                      <td className="font-semibold">{formatCurrency(salary.total_amount)}</td>
+                      <td>{formatCurrency(salary.amount_paid)}</td>
+                      <td>{formatCurrency(salary.balance)}</td>
+                      <td>
+                        <span className={`badge ${
+                          salary.status === 'paid' ? 'badge-success' :
+                          salary.status === 'partial' ? 'badge-warning' : 'badge-danger'
+                        }`}>
+                          {salary.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {reportType === 'expenses' && (
+          <div className="space-y-6">
+            <div className="flex items-center gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-zinc-200 mb-2">Start Date</label>
+                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="input" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-zinc-200 mb-2">End Date</label>
+                <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="input" />
+              </div>
+            </div>
+            <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50 rounded-lg p-4 mb-6">
+              <p className="text-sm text-red-800 dark:text-red-300 mb-1">Total Expenses</p>
+              <p className="text-3xl font-bold text-red-900 dark:text-red-200">{formatCurrency(expensesData?.total || 0)}</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th>Category</th>
+                    <th>Amount</th>
+                    <th>Vendor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {expensesData?.expenses.map((expense: any) => (
+                    <tr key={expense.id}>
+                      <td>{formatDate(expense.expense_date)}</td>
+                      <td className="font-medium">{expense.description}</td>
+                      <td><span className="badge badge-info">{expense.category}</span></td>
+                      <td className="font-semibold">{formatCurrency(expense.amount)}</td>
+                      <td>{expense.vendor || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {reportType === 'inventory' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-3 gap-4 mb-6">
+              <div className="p-4 bg-blue-50 dark:bg-blue-950/40 rounded-lg">
+                <p className="text-sm text-gray-600 dark:text-zinc-400">Total Items</p>
+                <p className="text-3xl font-bold">{inventoryData?.items.length || 0}</p>
+              </div>
+              <div className="p-4 bg-green-50 dark:bg-green-950/40 rounded-lg">
+                <p className="text-sm text-gray-600 dark:text-zinc-400">Total Value</p>
+                <p className="text-3xl font-bold text-green-600 dark:text-green-400">{formatCurrency(inventoryData?.totalValue || 0)}</p>
+              </div>
+              <div className="p-4 bg-amber-50 dark:bg-amber-950/40 rounded-lg">
+                <p className="text-sm text-gray-600 dark:text-zinc-400">Low Stock Items</p>
+                <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{inventoryData?.lowStockCount || 0}</p>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Item Name</th>
+                    <th>Category</th>
+                    <th>Quantity</th>
+                    <th>Unit Cost</th>
+                    <th>Total Value</th>
+                    <th>Status</th>
+                    <th>Location</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inventoryData?.items.map((item: any) => (
+                    <tr key={item.id}>
+                      <td className="font-medium">{item.item_name}</td>
+                      <td>{item.category || '-'}</td>
+                      <td>{item.quantity} {item.unit}</td>
+                      <td>{formatCurrency(item.unit_cost)}</td>
+                      <td className="font-semibold">{formatCurrency(item.total_value)}</td>
+                      <td>
+                        <span className={`badge ${
+                          item.status === 'in_stock' ? 'badge-success' :
+                          item.status === 'low_stock' ? 'badge-warning' : 'badge-danger'
+                        }`}>
+                          {item.status.replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td>{item.location || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {reportType === 'financial' && (
+          <div className="space-y-6">
+            <div className="flex items-center gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-zinc-200 mb-2">Start Date</label>
+                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="input" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-zinc-200 mb-2">End Date</label>
+                <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="input" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              <div className="p-4 bg-green-50 dark:bg-green-950/40 rounded-lg">
+                <p className="text-sm text-gray-600 dark:text-zinc-400 mb-1">Total Revenue</p>
+                <p className="text-2xl font-bold text-green-600 dark:text-green-400">{formatCurrency(financialData?.revenue || 0)}</p>
+              </div>
+              <div className="p-4 bg-red-50 dark:bg-red-950/40 rounded-lg">
+                <p className="text-sm text-gray-600 dark:text-zinc-400 mb-1">Total Expenses</p>
+                <p className="text-2xl font-bold text-red-600 dark:text-red-400">{formatCurrency(financialData?.expenses || 0)}</p>
+              </div>
+              <div className="p-4 bg-blue-50 dark:bg-blue-950/40 rounded-lg">
+                <p className="text-sm text-gray-600 dark:text-zinc-400 mb-1">Total Salaries</p>
+                <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{formatCurrency(financialData?.salaries || 0)}</p>
+              </div>
+              <div className={`p-4 rounded-lg ${(financialData?.netProfit || 0) >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/40' : 'bg-red-50 dark:bg-red-950/40'}`}>
+                <p className="text-sm text-gray-600 dark:text-zinc-400 mb-1">Net Profit</p>
+                <p className={`text-2xl font-bold ${(financialData?.netProfit || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                  {formatCurrency(financialData?.netProfit || 0)}
+                </p>
+              </div>
+            </div>
+            <div className="p-6 bg-slate-50 dark:bg-zinc-900 rounded-xl">
+              <h3 className="font-semibold text-slate-900 dark:text-zinc-50 mb-4">Financial Summary</h3>
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-slate-600 dark:text-zinc-400">Revenue:</span>
+                  <span className="font-semibold text-green-600 dark:text-green-400">{formatCurrency(financialData?.revenue || 0)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600 dark:text-zinc-400">Expenses:</span>
+                  <span className="font-semibold text-red-600 dark:text-red-400">-{formatCurrency(financialData?.expenses || 0)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600 dark:text-zinc-400">Salaries:</span>
+                  <span className="font-semibold text-blue-600 dark:text-blue-400">-{formatCurrency(financialData?.salaries || 0)}</span>
+                </div>
+                <div className="pt-2 border-t border-slate-200 dark:border-zinc-800 flex justify-between">
+                  <span className="font-bold text-slate-900 dark:text-zinc-50">Net Profit:</span>
+                  <span className={`font-bold ${(financialData?.netProfit || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {formatCurrency(financialData?.netProfit || 0)}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         )}

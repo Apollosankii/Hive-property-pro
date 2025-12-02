@@ -13,6 +13,9 @@ export interface Tenant {
   email?: string
   unit_id?: string
   id_photo_url?: string
+  emergency_contact_name?: string
+  emergency_contact_phone?: string
+  emergency_contact_relationship?: string
   status: 'active' | 'inactive'
   created_at: string
 }
@@ -29,9 +32,114 @@ export interface Unit {
   building_id: string
   unit_number: string
   monthly_rent: number
+  security_deposit_amount?: number
   tenant_id?: string
   status: 'occupied' | 'vacant'
   created_at: string
+}
+
+export interface UtilityType {
+  id: string
+  name: string
+  rate: number
+  unit_name: string
+  description?: string
+  is_active: boolean
+  display_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface UtilityBillItem {
+  id: string
+  bill_id: string
+  utility_type_id: string
+  units_consumed: number
+  rate: number
+  amount: number
+  created_at: string
+  utility_types?: UtilityType
+}
+
+export interface Employee {
+  id: string
+  name: string
+  phone: string
+  email?: string
+  position: string
+  department?: string
+  hire_date: string
+  salary_amount: number
+  status: 'active' | 'inactive' | 'terminated'
+  notes?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface Salary {
+  id: string
+  employee_id: string
+  salary_month: string
+  base_salary: number
+  bonuses: number
+  deductions: number
+  total_amount: number
+  amount_paid: number
+  balance: number
+  status: 'pending' | 'paid' | 'partial'
+  payment_date?: string
+  payment_method?: 'cash' | 'mpesa' | 'bank'
+  notes?: string
+  created_at: string
+  updated_at: string
+  employees?: Employee
+}
+
+export interface Expense {
+  id: string
+  description: string
+  category: 'maintenance' | 'utilities' | 'supplies' | 'insurance' | 'taxes' | 'legal' | 'marketing' | 'other'
+  amount: number
+  expense_date: string
+  vendor?: string
+  receipt_url?: string
+  building_id?: string
+  unit_id?: string
+  notes?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface Inventory {
+  id: string
+  item_name: string
+  description?: string
+  category?: string
+  quantity: number
+  unit: string
+  min_quantity: number
+  unit_cost: number
+  total_value: number
+  status: 'in_stock' | 'low_stock' | 'out_of_stock'
+  location?: string
+  supplier?: string
+  last_restocked?: string
+  notes?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface InventoryTransaction {
+  id: string
+  inventory_id: string
+  transaction_type: string
+  quantity: number
+  unit_cost?: number
+  total_cost: number
+  reference?: string
+  notes?: string
+  created_at: string
+  inventory?: Inventory
 }
 
 export interface Bill {
@@ -69,5 +177,33 @@ export interface Payment {
   payment_date: string
   notes?: string
   created_at: string
+}
+
+export interface SecurityDeposit {
+  id: string
+  tenant_id: string
+  unit_id: string
+  amount: number
+  date_deposited: string
+  total_deductions: number
+  refund_amount: number
+  status: 'active' | 'refunded' | 'forfeited' | 'processing'
+  notes?: string
+  created_at: string
+  updated_at: string
+  tenants?: Tenant
+  units?: Unit
+}
+
+export interface SecurityDepositDeduction {
+  id: string
+  security_deposit_id: string
+  deduction_type: 'arrears' | 'bills' | 'damages' | 'other'
+  amount: number
+  description?: string
+  bill_id?: string
+  created_at: string
+  security_deposits?: SecurityDeposit
+  bills?: Bill
 }
 

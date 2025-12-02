@@ -1,92 +1,333 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, Building } from '@/lib/supabase'
-import { Plus, Edit, Trash2, Building2 } from 'lucide-react'
+import { Plus, Edit, Trash2, Building2, AlertCircle, X, Home } from 'lucide-react'
+
+interface UnitForm {
+  id?: string
+  unit_number: string
+  monthly_rent: string
+}
 
 export default function Buildings() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingBuilding, setEditingBuilding] = useState<Building | null>(null)
   const [name, setName] = useState('')
   const [location, setLocation] = useState('')
+  const [units, setUnits] = useState<UnitForm[]>([])
+  const [error, setError] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
-  const { data: buildings } = useQuery({
+  const { data: buildings, error: buildingsError, isLoading: buildingsLoading } = useQuery({
     queryKey: ['buildings'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        console.warn('No session found, queries may fail due to RLS')
+      }
+
+      // Fetch buildings first
+      const { data: buildingsData, error: buildingsError } = await supabase
         .from('buildings')
-        .select('*, units(id)')
+        .select('*')
         .order('created_at', { ascending: false })
       
-      if (error) throw error
-      return data || []
+      if (buildingsError) {
+        console.error('Buildings query error:', buildingsError)
+        throw buildingsError
+      }
+
+      if (!buildingsData || buildingsData.length === 0) {
+        console.log('No buildings found')
+        return []
+      }
+
+      // Fetch units separately for each building
+      const buildingsWithUnits = await Promise.all(
+        buildingsData.map(async (building) => {
+          const { data: unitsData, error: unitsError } = await supabase
+            .from('units')
+            .select('id, unit_number, monthly_rent')
+            .eq('building_id', building.id)
+            .order('unit_number', { ascending: true })
+
+          if (unitsError) {
+            console.error(`Error fetching units for building ${building.id}:`, unitsError)
+            return { ...building, units: [] }
+          }
+
+          return {
+            ...building,
+            units: unitsData || []
+          }
+        })
+      )
+      
+      console.log('Buildings fetched:', buildingsWithUnits.length, 'buildings')
+      return buildingsWithUnits
     },
+    staleTime: 0,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
   })
 
+  // Load existing units when editing
+  useEffect(() => {
+    if (editingBuilding) {
+      loadExistingUnits(editingBuilding.id)
+    } else {
+      setUnits([])
+    }
+  }, [editingBuilding])
+
+  const loadExistingUnits = async (buildingId: string) => {
+    const { data, error } = await supabase
+      .from('units')
+      .select('id, unit_number, monthly_rent')
+      .eq('building_id', buildingId)
+      .order('unit_number')
+
+    if (!error && data) {
+      setUnits(data.map(u => ({
+        id: u.id,
+        unit_number: u.unit_number,
+        monthly_rent: u.monthly_rent.toString()
+      })))
+    }
+  }
+
   const createMutation = useMutation({
-    mutationFn: async (newBuilding: { name: string; location: string }) => {
-      const { data, error } = await supabase
+    mutationFn: async ({ building, units }: { building: { name: string; location: string }, units: UnitForm[] }) => {
+      // Create building first
+      const { data: buildingData, error: buildingError } = await supabase
         .from('buildings')
-        .insert([newBuilding])
+        .insert([building])
         .select()
         .single()
       
-      if (error) throw error
-      return data
+      if (buildingError) {
+        console.error('Create building error:', buildingError)
+        throw buildingError
+      }
+
+      // Create units if any
+      if (units.length > 0 && buildingData) {
+        const unitsToInsert = units
+          .filter(u => u.unit_number.trim() && u.monthly_rent)
+          .map(u => ({
+            building_id: buildingData.id,
+            unit_number: u.unit_number.trim(),
+            monthly_rent: parseFloat(u.monthly_rent) || 0,
+            status: 'vacant' as const
+          }))
+
+        if (unitsToInsert.length > 0) {
+          const { error: unitsError } = await supabase
+            .from('units')
+            .insert(unitsToInsert)
+
+          if (unitsError) {
+            console.error('Create units error:', unitsError)
+            throw unitsError
+          }
+        }
+      }
+
+      return buildingData
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['buildings'] })
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['buildings'] })
+      await queryClient.invalidateQueries({ queryKey: ['units'] })
+      await queryClient.invalidateQueries({ queryKey: ['occupancy-report'] })
+      await queryClient.refetchQueries({ queryKey: ['buildings'] })
+      await queryClient.refetchQueries({ queryKey: ['units'] })
+      await queryClient.refetchQueries({ queryKey: ['occupancy-report'] })
       setIsModalOpen(false)
       setName('')
       setLocation('')
+      setUnits([])
+      setError(null)
+    },
+    onError: (error: any) => {
+      console.error('Failed to create building:', error)
+      setError(error.message || 'Failed to create building. Please check your Supabase configuration.')
     },
   })
 
   const updateMutation = useMutation({
-    mutationFn: async ({ id, ...updates }: Partial<Building> & { id: string }) => {
-      const { data, error } = await supabase
+    mutationFn: async ({ id, building, units }: { id: string, building: Partial<Building>, units: UnitForm[] }) => {
+      // Update building
+      const { data: buildingData, error: buildingError } = await supabase
         .from('buildings')
-        .update(updates)
+        .update(building)
         .eq('id', id)
         .select()
         .single()
       
-      if (error) throw error
-      return data
+      if (buildingError) {
+        console.error('Update building error:', buildingError)
+        throw buildingError
+      }
+
+      // Get existing units
+      const { data: existingUnits } = await supabase
+        .from('units')
+        .select('id')
+        .eq('building_id', id)
+
+      const existingUnitIds = new Set(existingUnits?.map(u => u.id) || [])
+      const formUnitIds = new Set(units.filter(u => u.id).map(u => u.id!))
+
+      // Delete units that were removed
+      const unitsToDelete = Array.from(existingUnitIds).filter(id => !formUnitIds.has(id))
+      if (unitsToDelete.length > 0) {
+        const { error: deleteError } = await supabase
+          .from('units')
+          .delete()
+          .in('id', unitsToDelete)
+
+        if (deleteError) {
+          console.error('Delete units error:', deleteError)
+          throw deleteError
+        }
+      }
+
+      // Update or create units
+      for (const unit of units) {
+        if (!unit.unit_number.trim() || !unit.monthly_rent) continue
+
+        if (unit.id) {
+          // Update existing unit
+          const { error: updateError } = await supabase
+            .from('units')
+            .update({
+              unit_number: unit.unit_number.trim(),
+              monthly_rent: parseFloat(unit.monthly_rent) || 0
+            })
+            .eq('id', unit.id)
+
+          if (updateError) {
+            console.error('Update unit error:', updateError)
+            throw updateError
+          }
+        } else {
+          // Create new unit
+          const { error: createError } = await supabase
+            .from('units')
+            .insert([{
+              building_id: id,
+              unit_number: unit.unit_number.trim(),
+              monthly_rent: parseFloat(unit.monthly_rent) || 0,
+              status: 'vacant' as const
+            }])
+
+          if (createError) {
+            console.error('Create unit error:', createError)
+            throw createError
+          }
+        }
+      }
+
+      return buildingData
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['buildings'] })
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['buildings'] })
+      await queryClient.invalidateQueries({ queryKey: ['units'] })
+      await queryClient.invalidateQueries({ queryKey: ['occupancy-report'] })
+      await queryClient.refetchQueries({ queryKey: ['buildings'] })
+      await queryClient.refetchQueries({ queryKey: ['units'] })
+      await queryClient.refetchQueries({ queryKey: ['occupancy-report'] })
       setIsModalOpen(false)
       setEditingBuilding(null)
       setName('')
       setLocation('')
+      setUnits([])
+      setError(null)
+    },
+    onError: (error: any) => {
+      console.error('Failed to update building:', error)
+      setError(error.message || 'Failed to update building. Please check your Supabase configuration.')
     },
   })
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('buildings').delete().eq('id', id)
-      if (error) throw error
+      if (error) {
+        console.error('Delete building error:', error)
+        throw error
+      }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['buildings'] })
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['buildings'] })
+      await queryClient.invalidateQueries({ queryKey: ['units'] })
+      await queryClient.invalidateQueries({ queryKey: ['occupancy-report'] })
+      await queryClient.refetchQueries({ queryKey: ['buildings'] })
+      await queryClient.refetchQueries({ queryKey: ['units'] })
+      await queryClient.refetchQueries({ queryKey: ['occupancy-report'] })
+    },
+    onError: (error: any) => {
+      console.error('Failed to delete building:', error)
+      alert(error.message || 'Failed to delete building. Please check your Supabase configuration.')
     },
   })
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setError(null)
+    
+    // Check if user is authenticated
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) {
+      setError('You must be logged in to perform this action. Please refresh the page and log in again.')
+      return
+    }
+
+    // Validate units
+    const validUnits = units.filter(u => u.unit_number.trim() && u.monthly_rent)
+    const duplicateUnits = validUnits.filter((u, i) => 
+      validUnits.findIndex(v => v.unit_number.trim().toLowerCase() === u.unit_number.trim().toLowerCase()) !== i
+    )
+
+    if (duplicateUnits.length > 0) {
+      setError('Duplicate unit numbers found. Please ensure each unit has a unique number.')
+      return
+    }
+
     if (editingBuilding) {
-      updateMutation.mutate({ id: editingBuilding.id, name, location })
+      updateMutation.mutate({ 
+        id: editingBuilding.id, 
+        building: { name, location },
+        units: validUnits
+      })
     } else {
-      createMutation.mutate({ name, location })
+      createMutation.mutate({ 
+        building: { name, location },
+        units: validUnits
+      })
     }
   }
 
-  const handleEdit = (building: Building) => {
+  const addUnit = () => {
+    setUnits([...units, { unit_number: '', monthly_rent: '' }])
+  }
+
+  const removeUnit = (index: number) => {
+    setUnits(units.filter((_, i) => i !== index))
+  }
+
+  const updateUnit = (index: number, field: keyof UnitForm, value: string) => {
+    const updated = [...units]
+    updated[index] = { ...updated[index], [field]: value }
+    setUnits(updated)
+  }
+
+  const handleEdit = async (building: Building) => {
     setEditingBuilding(building)
     setName(building.name)
     setLocation(building.location)
     setIsModalOpen(true)
+    await loadExistingUnits(building.id)
   }
 
   const handleDelete = (id: string) => {
@@ -96,122 +337,279 @@ export default function Buildings() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Buildings</h1>
+    <div className="space-y-4 animate-fade-in w-full max-w-full overflow-x-hidden">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 dark:from-slate-100 dark:to-slate-300 bg-clip-text text-transparent">
+            Buildings
+          </h1>
+          <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">Manage your property buildings</p>
+        </div>
         <button
           onClick={() => {
             setIsModalOpen(true)
             setEditingBuilding(null)
             setName('')
             setLocation('')
+            setUnits([])
+            setError(null)
           }}
-          className="btn btn-primary flex items-center gap-2"
+          className="btn btn-primary"
         >
           <Plus size={20} />
           Add Building
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {buildings?.map((building: any) => (
-          <div key={building.id} className="card">
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-primary-100 rounded-lg">
-                  <Building2 className="text-primary-600" size={24} />
+      {buildingsError && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
+          <p className="text-sm font-semibold text-red-900 mb-1">Error loading buildings</p>
+          <p className="text-sm text-red-700">{buildingsError.message || 'Failed to load buildings. Please check your Supabase configuration and ensure you are logged in.'}</p>
+        </div>
+      )}
+
+      {buildingsLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="card">
+              <div className="skeleton h-32 rounded-xl"></div>
+            </div>
+          ))}
+        </div>
+      ) : buildings && buildings.length > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {buildings.map((building: any) => (
+            <div key={building.id} className="card card-hover group">
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-gradient-to-br from-primary-500 to-primary-600 rounded-xl shadow-lg shadow-primary-500/20">
+                    <Building2 className="text-white" size={24} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-lg text-slate-900">{building.name}</h3>
+                    <p className="text-sm text-slate-600 mt-0.5">{building.location}</p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-semibold text-lg">{building.name}</h3>
-                  <p className="text-sm text-gray-600">{building.location}</p>
+              </div>
+              
+              <div className="flex items-center justify-between pt-4 border-t border-slate-200">
+                <div className="flex items-center gap-2">
+                  <div className="px-3 py-1.5 bg-slate-100 rounded-lg">
+                    <span className="text-sm font-semibold text-slate-700">
+                      {building.units?.length || 0} {building.units?.length === 1 ? 'Unit' : 'Units'}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleEdit(building)}
+                    className="p-2 text-slate-600 hover:text-primary-600 hover:bg-primary-50 rounded-xl transition-all"
+                    title="Edit"
+                  >
+                    <Edit size={18} />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(building.id)}
+                    className="p-2 text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
+                    title="Delete"
+                  >
+                    <Trash2 size={18} />
+                  </button>
                 </div>
               </div>
             </div>
-            
-            <div className="flex items-center justify-between pt-4 border-t border-gray-200">
-              <span className="text-sm text-gray-600">
-                {building.units?.length || 0} Units
-              </span>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => handleEdit(building)}
-                  className="p-2 text-gray-600 hover:text-primary-600 hover:bg-gray-100 rounded"
-                >
-                  <Edit size={18} />
-                </button>
-                <button
-                  onClick={() => handleDelete(building.id)}
-                  className="p-2 text-gray-600 hover:text-red-600 hover:bg-gray-100 rounded"
-                >
-                  <Trash2 size={18} />
-                </button>
-              </div>
-            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="card text-center py-16">
+          <div className="w-20 h-20 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <Building2 className="text-slate-400" size={40} />
           </div>
-        ))}
-      </div>
+          <h3 className="text-lg font-semibold text-slate-900 mb-2">No buildings yet</h3>
+          <p className="text-slate-600 mb-6">Get started by adding your first building</p>
+          <button
+            onClick={() => {
+              setIsModalOpen(true)
+              setEditingBuilding(null)
+              setName('')
+              setLocation('')
+            }}
+            className="btn btn-primary"
+          >
+            <Plus size={20} />
+            Add Building
+          </button>
+        </div>
+      )}
 
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-md w-full p-6">
-            <h2 className="text-2xl font-bold mb-4">
-              {editingBuilding ? 'Edit Building' : 'Add Building'}
-            </h2>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Building Name
-                </label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                  className="input"
-                  placeholder="Building A"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Location
-                </label>
-                <input
-                  type="text"
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                  required
-                  className="input"
-                  placeholder="Nairobi, Kenya"
-                />
-              </div>
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsModalOpen(false)
-                    setEditingBuilding(null)
-                    setName('')
-                    setLocation('')
-                  }}
-                  className="flex-1 btn btn-secondary"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 btn btn-primary"
-                  disabled={createMutation.isPending || updateMutation.isPending}
-                >
-                  {createMutation.isPending || updateMutation.isPending
-                    ? 'Saving...'
-                    : 'Save'}
-                </button>
-              </div>
-            </form>
+        <div className="modal-overlay" onClick={() => {
+          setIsModalOpen(false)
+          setEditingBuilding(null)
+          setName('')
+          setLocation('')
+          setUnits([])
+          setError(null)
+        }}>
+          <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 max-h-[90vh] overflow-y-auto">
+              <h2 className="text-2xl font-bold text-slate-900 mb-6">
+                {editingBuilding ? 'Edit Building' : 'Add Building'}
+              </h2>
+              {error && (
+                <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3">
+                  <AlertCircle className="text-red-600 flex-shrink-0 mt-0.5" size={20} />
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-red-900 mb-1">Error</p>
+                    <p className="text-sm text-red-700">{error}</p>
+                  </div>
+                  <button
+                    onClick={() => setError(null)}
+                    className="text-red-600 hover:text-red-800"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              )}
+              <form onSubmit={handleSubmit} className="space-y-5">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
+                    Building Name
+                  </label>
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                    className="input"
+                    placeholder="Building A"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
+                    Location
+                  </label>
+                  <input
+                    type="text"
+                    value={location}
+                    onChange={(e) => setLocation(e.target.value)}
+                    required
+                    className="input"
+                    placeholder="Nairobi, Kenya"
+                  />
+                </div>
+
+                {/* Units Section */}
+                <div className="border-t border-slate-200 pt-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-1">
+                        Units
+                      </label>
+                      <p className="text-xs text-slate-500">Add units to this building (optional)</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addUnit}
+                      className="btn btn-secondary text-sm"
+                    >
+                      <Plus size={16} />
+                      Add Unit
+                    </button>
+                  </div>
+
+                  {units.length > 0 && (
+                    <div className="space-y-3">
+                      {units.map((unit, index) => (
+                        <div key={index} className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                          <div className="flex items-start gap-3">
+                            <div className="flex-1 grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs font-medium text-slate-600 mb-1.5">
+                                  Unit Number
+                                </label>
+                                <input
+                                  type="text"
+                                  value={unit.unit_number}
+                                  onChange={(e) => updateUnit(index, 'unit_number', e.target.value)}
+                                  className="input text-sm"
+                                  placeholder="A101"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-slate-600 mb-1.5">
+                                  Monthly Rent (KES)
+                                </label>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={unit.monthly_rent}
+                                  onChange={(e) => updateUnit(index, 'monthly_rent', e.target.value)}
+                                  className="input text-sm"
+                                  placeholder="15000"
+                                />
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removeUnit(index)}
+                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors mt-6"
+                              title="Remove unit"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {units.length === 0 && (
+                    <div className="text-center py-8 border-2 border-dashed border-slate-200 rounded-xl">
+                      <Home className="text-slate-400 mx-auto mb-2" size={24} />
+                      <p className="text-sm text-slate-500">No units added yet</p>
+                      <p className="text-xs text-slate-400 mt-1">Click "Add Unit" to get started</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-3 pt-4 border-t border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsModalOpen(false)
+                      setEditingBuilding(null)
+                      setName('')
+                      setLocation('')
+                      setUnits([])
+                      setError(null)
+                    }}
+                    className="flex-1 btn btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 btn btn-primary"
+                    disabled={createMutation.isPending || updateMutation.isPending}
+                  >
+                    {createMutation.isPending || updateMutation.isPending ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        Saving...
+                      </>
+                    ) : (
+                      'Save'
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}
     </div>
   )
 }
+
 

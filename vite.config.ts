@@ -8,11 +8,11 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+      includeAssets: ['favicon.svg', 'logo.svg', 'apple-touch-icon.png'],
       manifest: {
-        name: 'Property Management PWA',
-        short_name: 'PropMgmt',
-        description: 'Property Management & Utility Billing System',
+        name: 'PropManager - Property Management',
+        short_name: 'PropManager',
+        description: 'Professional Property Management & Utility Billing System',
         theme_color: '#2563eb',
         background_color: '#ffffff',
         display: 'standalone',
@@ -23,12 +23,20 @@ export default defineConfig({
           {
             src: 'pwa-192x192.png',
             sizes: '192x192',
-            type: 'image/png'
+            type: 'image/png',
+            purpose: 'any maskable'
           },
           {
             src: 'pwa-512x512.png',
             sizes: '512x512',
-            type: 'image/png'
+            type: 'image/png',
+            purpose: 'any maskable'
+          },
+          {
+            src: 'logo.svg',
+            sizes: 'any',
+            type: 'image/svg+xml',
+            purpose: 'any'
           }
         ]
       },
@@ -56,13 +64,13 @@ export default defineConfig({
     }
   },
   server: {
-    port: 3000,
-    host: '0.0.0.0',
+    port: 5173,
+    host: true,
     strictPort: false
   },
   preview: {
-    port: 3000,
-    host: '0.0.0.0',
+    port: 4173,
+    host: true,
     strictPort: false
   }
 })

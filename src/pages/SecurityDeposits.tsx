@@ -1,0 +1,465 @@
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { supabase, SecurityDeposit } from '@/lib/supabase'
+import { formatCurrency, formatDate } from '@/lib/utils'
+import { Shield, AlertCircle, X, FileText } from 'lucide-react'
+
+export default function SecurityDeposits() {
+  const [selectedDeposit, setSelectedDeposit] = useState<SecurityDeposit | null>(null)
+  const [showLeaseEndModal, setShowLeaseEndModal] = useState(false)
+  const [damagesAmount, setDamagesAmount] = useState('')
+  const [damagesDescription, setDamagesDescription] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+
+  const { data: deposits, error: depositsError, isLoading: depositsLoading } = useQuery({
+    queryKey: ['security-deposits'],
+    queryFn: async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        console.warn('No session found, queries may fail due to RLS')
+      }
+
+      const { data, error } = await supabase
+        .from('security_deposits')
+        .select('*')
+        .order('created_at', { ascending: false })
+      
+      if (error) throw error
+
+      // Fetch related data
+      const depositsWithRelations = await Promise.all(
+        (data || []).map(async (deposit: any) => {
+          const [tenantRes, unitRes] = await Promise.all([
+            supabase
+              .from('tenants')
+              .select('name, phone')
+              .eq('id', deposit.tenant_id)
+              .single(),
+            supabase
+              .from('units')
+              .select('unit_number, buildings(name)')
+              .eq('id', deposit.unit_id)
+              .single()
+          ])
+
+          return {
+            ...deposit,
+            tenants: tenantRes.data,
+            units: unitRes.data
+          }
+        })
+      )
+
+      return depositsWithRelations
+    },
+    staleTime: 0,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
+  })
+
+  const { data: deductions } = useQuery({
+    queryKey: ['security-deposit-deductions', selectedDeposit?.id],
+    queryFn: async () => {
+      if (!selectedDeposit) return []
+      
+      const { data, error } = await supabase
+        .from('security_deposit_deductions')
+        .select('*')
+        .eq('security_deposit_id', selectedDeposit.id)
+        .order('created_at', { ascending: false })
+      
+      if (error) throw error
+      return data || []
+    },
+    enabled: !!selectedDeposit,
+  })
+
+  const processLeaseEndMutation = useMutation({
+    mutationFn: async ({ depositId, damagesAmount, damagesDescription }: { 
+      depositId: string
+      damagesAmount: number
+      damagesDescription: string
+    }) => {
+      // Get tenant's outstanding balance and arrears
+      const { data: depositData } = await supabase
+        .from('security_deposits')
+        .select('tenant_id, unit_id')
+        .eq('id', depositId)
+        .single()
+
+      if (!depositData) throw new Error('Deposit not found')
+
+      // Calculate total arrears
+      const { data: billsData } = await supabase
+        .from('bills')
+        .select('balance, total_amount')
+        .eq('tenant_id', depositData.tenant_id)
+        .gt('balance', 0)
+
+      const totalArrears = (billsData || []).reduce((sum, b) => sum + (b.balance || 0), 0)
+
+      // Record damages deduction if any
+      if (damagesAmount > 0) {
+        const { error: damagesError } = await supabase
+          .from('security_deposit_deductions')
+          .insert([{
+            security_deposit_id: depositId,
+            deduction_type: 'damages',
+            amount: damagesAmount,
+            description: damagesDescription || 'Damages at lease end'
+          }])
+
+        if (damagesError) throw damagesError
+      }
+
+      // Record arrears deduction if any
+      if (totalArrears > 0) {
+        const { error: arrearsError } = await supabase
+          .from('security_deposit_deductions')
+          .insert([{
+            security_deposit_id: depositId,
+            deduction_type: 'arrears',
+            amount: totalArrears,
+            description: 'Outstanding arrears at lease end'
+          }])
+
+        if (arrearsError) throw arrearsError
+      }
+
+      // Update deposit status to 'refunded' if refund amount > 0, otherwise 'forfeited'
+      const { data: updatedDeposit } = await supabase
+        .from('security_deposits')
+        .select('refund_amount')
+        .eq('id', depositId)
+        .single()
+
+      const status = (updatedDeposit?.refund_amount || 0) > 0 ? 'refunded' : 'forfeited'
+
+      const { error: updateError } = await supabase
+        .from('security_deposits')
+        .update({ 
+          status,
+          notes: `Lease ended. ${damagesDescription || ''}`
+        })
+        .eq('id', depositId)
+
+      if (updateError) throw updateError
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['security-deposits'] })
+      await queryClient.invalidateQueries({ queryKey: ['security-deposit-deductions'] })
+      setShowLeaseEndModal(false)
+      setSelectedDeposit(null)
+      setDamagesAmount('')
+      setDamagesDescription('')
+      setError(null)
+      alert('Lease end processed successfully!')
+    },
+    onError: (error: any) => {
+      console.error('Failed to process lease end:', error)
+      setError(error.message || 'Failed to process lease end')
+    },
+  })
+
+  const handleProcessLeaseEnd = (deposit: SecurityDeposit) => {
+    setSelectedDeposit(deposit)
+    setShowLeaseEndModal(true)
+    setError(null)
+  }
+
+  const handleSubmitLeaseEnd = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedDeposit) return
+
+    processLeaseEndMutation.mutate({
+      depositId: selectedDeposit.id,
+      damagesAmount: parseFloat(damagesAmount) || 0,
+      damagesDescription: damagesDescription
+    })
+  }
+
+  return (
+    <div className="space-y-4 animate-fade-in w-full max-w-full overflow-x-hidden">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 dark:from-slate-100 dark:to-slate-300 bg-clip-text text-transparent">
+            Security Deposits
+          </h1>
+          <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">Manage tenant security deposits and refunds</p>
+        </div>
+      </div>
+
+      {depositsError && (
+        <div className="card p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50">
+          <p className="text-sm text-red-700 dark:text-red-400">
+            Error loading security deposits: {depositsError.message}
+          </p>
+        </div>
+      )}
+
+      {depositsLoading ? (
+        <div className="card text-center py-16">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
+          <p className="mt-4 text-slate-600 dark:text-slate-400">Loading security deposits...</p>
+        </div>
+      ) : deposits && deposits.length > 0 ? (
+        <div className="card overflow-x-auto w-full">
+          <table className="table w-full text-xs sm:text-sm">
+            <thead>
+              <tr>
+                <th className="min-w-[120px]">Tenant</th>
+                <th className="min-w-[100px]">Unit</th>
+                <th className="min-w-[100px]">Amount</th>
+                <th className="min-w-[100px]">Deductions</th>
+                <th className="min-w-[100px]">Refund</th>
+                <th className="min-w-[80px]">Status</th>
+                <th className="min-w-[100px]">Date Deposited</th>
+                <th className="min-w-[120px]">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {deposits.map((deposit: any) => (
+                <tr key={deposit.id}>
+                  <td className="text-slate-700 dark:text-slate-300">
+                    <div className="flex flex-col">
+                      <span className="font-semibold">{deposit.tenants?.name || 'N/A'}</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                        {deposit.tenants?.phone || ''}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="text-slate-600 dark:text-slate-400">
+                    {deposit.units?.unit_number} ({deposit.units?.buildings?.name})
+                  </td>
+                  <td className="font-bold text-slate-900 dark:text-slate-100">
+                    {formatCurrency(deposit.amount)}
+                  </td>
+                  <td className="font-medium text-red-600 dark:text-red-400">
+                    {formatCurrency(deposit.total_deductions || 0)}
+                  </td>
+                  <td className="font-bold text-emerald-600 dark:text-emerald-400">
+                    {formatCurrency(deposit.refund_amount || 0)}
+                  </td>
+                  <td>
+                    <span
+                      className={`badge text-[10px] px-1.5 py-0.5 ${
+                        deposit.status === 'active'
+                          ? 'badge-success'
+                          : deposit.status === 'refunded'
+                          ? 'badge-info'
+                          : deposit.status === 'processing'
+                          ? 'badge-warning'
+                          : 'badge-danger'
+                      }`}
+                    >
+                      {deposit.status}
+                    </span>
+                  </td>
+                  <td className="text-slate-600 dark:text-slate-400">
+                    {formatDate(deposit.date_deposited)}
+                  </td>
+                  <td>
+                    <div className="flex items-center gap-1">
+                      {deposit.status === 'active' && (
+                        <button
+                          onClick={() => handleProcessLeaseEnd(deposit)}
+                          className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
+                          title="Process Lease End"
+                        >
+                          <FileText size={14} />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setSelectedDeposit(deposit)}
+                        className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
+                        title="View Details"
+                      >
+                        <Shield size={14} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="card text-center py-16">
+          <div className="w-20 h-20 bg-slate-100 dark:bg-zinc-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <Shield className="text-slate-400" size={40} />
+          </div>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-2">No security deposits yet</h3>
+          <p className="text-slate-600 dark:text-slate-400 mb-6">Security deposits will appear here when tenants are created</p>
+        </div>
+      )}
+
+      {/* Lease End Modal */}
+      {showLeaseEndModal && selectedDeposit && (
+        <div className="modal-overlay" onClick={() => {
+          setShowLeaseEndModal(false)
+          setSelectedDeposit(null)
+          setError(null)
+        }}>
+          <div className="modal-content max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6">
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mb-2">
+                Process Lease End
+              </h2>
+              <p className="text-sm text-slate-600 dark:text-zinc-400 mb-6">
+                Calculate deductions and process refund for {selectedDeposit.tenants?.name || 'tenant'}
+              </p>
+
+              {error && (
+                <div className="mb-4 p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50 rounded-xl flex items-start gap-3">
+                  <AlertCircle className="text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" size={20} />
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-red-900 dark:text-red-300 mb-1">Error</p>
+                    <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+                  </div>
+                  <button
+                    onClick={() => setError(null)}
+                    className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              )}
+
+              <div className="mb-6 p-4 bg-slate-50 dark:bg-zinc-900 rounded-xl">
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-sm text-slate-600 dark:text-zinc-400">Deposit Amount:</span>
+                    <span className="font-bold text-slate-900 dark:text-zinc-100">{formatCurrency(selectedDeposit.amount)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-slate-600 dark:text-zinc-400">Current Deductions:</span>
+                    <span className="font-medium text-red-600 dark:text-red-400">{formatCurrency(selectedDeposit.total_deductions || 0)}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-slate-200 dark:border-zinc-700 pt-2">
+                    <span className="text-sm font-semibold text-slate-700 dark:text-zinc-300">Current Refund:</span>
+                    <span className="font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(selectedDeposit.refund_amount || 0)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <form onSubmit={handleSubmitLeaseEnd} className="space-y-5">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-200 mb-2">
+                    Damages Amount (KES)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={damagesAmount}
+                    onChange={(e) => setDamagesAmount(e.target.value)}
+                    className="input"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-200 mb-2">
+                    Damages Description
+                  </label>
+                  <textarea
+                    value={damagesDescription}
+                    onChange={(e) => setDamagesDescription(e.target.value)}
+                    className="input"
+                    rows={3}
+                    placeholder="Describe any damages or additional charges..."
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-4 border-t border-slate-200 dark:border-zinc-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowLeaseEndModal(false)
+                      setSelectedDeposit(null)
+                      setError(null)
+                    }}
+                    className="flex-1 btn btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 btn btn-primary"
+                    disabled={processLeaseEndMutation.isPending}
+                  >
+                    {processLeaseEndMutation.isPending ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                        Processing...
+                      </>
+                    ) : (
+                      'Process Lease End'
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Deductions Detail Modal */}
+      {selectedDeposit && !showLeaseEndModal && (
+        <div className="modal-overlay" onClick={() => setSelectedDeposit(null)}>
+          <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6">
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mb-2">
+                Security Deposit Details
+              </h2>
+              <p className="text-sm text-slate-600 dark:text-zinc-400 mb-6">
+                {selectedDeposit.tenants?.name || 'Tenant'} - {selectedDeposit.units?.unit_number}
+              </p>
+
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="p-4 bg-slate-50 dark:bg-zinc-900 rounded-xl">
+                  <p className="text-sm text-slate-600 dark:text-zinc-400 mb-1">Deposit Amount</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-zinc-100">{formatCurrency(selectedDeposit.amount)}</p>
+                </div>
+                <div className="p-4 bg-slate-50 dark:bg-zinc-900 rounded-xl">
+                  <p className="text-sm text-slate-600 dark:text-zinc-400 mb-1">Refund Amount</p>
+                  <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(selectedDeposit.refund_amount || 0)}</p>
+                </div>
+              </div>
+
+              {deductions && deductions.length > 0 && (
+                <div>
+                  <h3 className="font-semibold text-slate-700 dark:text-zinc-300 mb-3">Deductions</h3>
+                  <div className="space-y-2">
+                    {deductions.map((deduction: any) => (
+                      <div key={deduction.id} className="p-3 bg-slate-50 dark:bg-zinc-900 rounded-lg flex justify-between items-center">
+                        <div>
+                          <p className="font-medium text-slate-900 dark:text-zinc-100 capitalize">{deduction.deduction_type}</p>
+                          {deduction.description && (
+                            <p className="text-xs text-slate-600 dark:text-zinc-400">{deduction.description}</p>
+                          )}
+                          <p className="text-xs text-slate-500 dark:text-zinc-500">{formatDate(deduction.created_at)}</p>
+                        </div>
+                        <p className="font-bold text-red-600 dark:text-red-400">{formatCurrency(deduction.amount)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-4 border-t border-slate-200 dark:border-zinc-800 mt-6">
+                <button
+                  onClick={() => setSelectedDeposit(null)}
+                  className="flex-1 btn btn-secondary"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
