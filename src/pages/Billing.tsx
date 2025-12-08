@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatMonth } from '@/lib/utils'
 import { generateInvoicePDF, generateBulkInvoicesPDF } from '@/lib/pdf'
 import { exportBillsToExcel } from '@/lib/excel'
-import { importBillsFromExcel } from '@/lib/excel-import'
+import { importBillsFromFile } from '@/lib/excel-import'
 import { Plus, Calendar, CheckCircle, Receipt, Edit, FileText, AlertCircle, X, Printer, FileSpreadsheet, Upload } from 'lucide-react'
 
 export default function Billing() {
@@ -888,7 +888,7 @@ export default function Billing() {
 
   const handleImportBills = async () => {
     if (!importFile) {
-      setError('Please select an Excel file')
+      setError('Please select a file (PDF or Excel)')
       return
     }
 
@@ -898,7 +898,7 @@ export default function Billing() {
     setImportResult(null)
 
     try {
-      const result = await importBillsFromExcel(importFile, selectedMonth, (progress, message) => {
+      const result = await importBillsFromFile(importFile, selectedMonth, (progress, message) => {
         setImportProgress(progress)
         setImportMessage(message)
       })
@@ -906,13 +906,17 @@ export default function Billing() {
       setImportResult(result)
       setImportMessage(`Import completed: ${result.success} successful, ${result.errors.length} errors`)
 
-      // Refresh bills list
+      // Refresh bills list and related data
       await queryClient.invalidateQueries({ queryKey: ['bills'] })
       await queryClient.refetchQueries({ queryKey: ['bills'] })
       await queryClient.invalidateQueries({ queryKey: ['arrears-report'] })
       await queryClient.refetchQueries({ queryKey: ['arrears-report'] })
       await queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
       await queryClient.refetchQueries({ queryKey: ['dashboard-stats'] })
+      await queryClient.invalidateQueries({ queryKey: ['tenants'] })
+      await queryClient.refetchQueries({ queryKey: ['tenants'] })
+      await queryClient.invalidateQueries({ queryKey: ['units'] })
+      await queryClient.refetchQueries({ queryKey: ['units'] })
     } catch (err: any) {
       setError(err.message || 'Failed to import bills')
       setImportMessage('Import failed')
@@ -993,7 +997,7 @@ export default function Billing() {
             title="Import bills from Excel"
           >
             <Upload size={18} className="sm:size-5" />
-            <span className="hidden sm:inline">Import Excel</span>
+            <span className="hidden sm:inline">Import File</span>
             <span className="sm:hidden">Import</span>
           </button>
           {bills && bills.length > 0 && (
@@ -2126,18 +2130,19 @@ export default function Billing() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                    Select Excel File
+                    Select File (PDF or Excel)
                   </label>
                   <input
                     type="file"
-                    accept=".xlsx,.xls"
+                    accept=".xlsx,.xls,.pdf"
                     onChange={(e) => setImportFile(e.target.files?.[0] || null)}
                     className="input"
                   />
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
-                    Expected columns: Unit, Names, Water Sept/Prev, Water Oct/Current, Water Units, Water Rate, Amount Water, 
-                    Electricity Sept/Prev, Electricity Oct/Current, Electricity Elect units, Electricity Rate, Amount Power, 
-                    Rent & Arrears fee, Garbage, Total, Paid, Due
+                    <strong>Supported formats:</strong> PDF or Excel (.xlsx, .xls)<br />
+                    <strong>Expected data:</strong> Unit, Names (with phone numbers), Water readings (Sept/Oct), 
+                    Electricity readings (Sept/Oct), Rent, Garbage fee, Total, Paid, Due.<br />
+                    <strong>Note:</strong> The system will automatically create/update tenants from the Names column.
                   </p>
                 </div>
 

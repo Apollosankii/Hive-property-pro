@@ -6,13 +6,16 @@ import { FileSpreadsheet } from 'lucide-react'
 import { exportToExcel } from '@/lib/excel'
 
 export default function Reports() {
+  // Set default date range to last 10 years to show all refunds by default
   const [startDate, setStartDate] = useState(
-    new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+    new Date(new Date().getFullYear() - 10, 0, 1)
       .toISOString()
       .split('T')[0]
   )
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0])
-  const [reportType, setReportType] = useState<'revenue' | 'arrears' | 'occupancy' | 'salaries' | 'expenses' | 'inventory' | 'financial'>('revenue')
+  const [endDate, setEndDate] = useState(
+    new Date(new Date().getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0] // Tomorrow to include today
+  )
+  const [reportType, setReportType] = useState<'revenue' | 'arrears' | 'occupancy' | 'salaries' | 'expenses' | 'inventory' | 'financial' | 'refunds'>('revenue')
 
   const { data: revenueData, error: revenueError } = useQuery({
     queryKey: ['revenue-report', startDate, endDate],
@@ -342,25 +345,215 @@ export default function Reports() {
     staleTime: 0,
   })
 
+  // Security Deposits Held Query (Total active deposits)
+  const { data: depositsHeldData } = useQuery({
+    queryKey: ['security-deposits-held'],
+    queryFn: async () => {
+      const { data: depositsData, error } = await supabase
+        .from('security_deposits')
+        .select('amount, total_deductions, refund_amount')
+        .eq('status', 'active')
+      
+      if (error) {
+        console.error('Security deposits held query error:', error)
+        throw error
+      }
+
+      const totalHeld = depositsData?.reduce((sum, d) => sum + (d.amount || 0), 0) || 0
+      const totalDeductions = depositsData?.reduce((sum, d) => sum + (d.total_deductions || 0), 0) || 0
+      const netHeld = totalHeld - totalDeductions
+
+      return { 
+        totalHeld, 
+        totalDeductions, 
+        netHeld,
+        count: depositsData?.length || 0
+      }
+    },
+    staleTime: 0,
+    refetchOnMount: true,
+  })
+
   // Financial Summary Query
   const { data: financialData } = useQuery({
     queryKey: ['financial-summary', startDate, endDate],
     queryFn: async () => {
-      const [revenueRes, expensesRes, salariesRes] = await Promise.all([
+      // Convert date strings to ISO format with time for proper timestamp comparison
+      const startDateTime = new Date(startDate).toISOString()
+      const endDateTime = new Date(endDate + 'T23:59:59.999Z').toISOString()
+      
+      const [revenueRes, expensesRes, salariesRes, refundsRes] = await Promise.all([
         supabase.from('payments').select('amount').gte('payment_date', startDate).lte('payment_date', endDate),
         supabase.from('expenses').select('amount').gte('expense_date', startDate).lte('expense_date', endDate),
         supabase.from('salaries').select('total_amount').gte('salary_month', startDate).lte('salary_month', endDate),
+        supabase.from('security_deposits').select('refund_amount').eq('status', 'refunded').gte('updated_at', startDateTime).lte('updated_at', endDateTime),
       ])
 
       const revenue = revenueRes.data?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0
       const expenses = expensesRes.data?.reduce((sum, e) => sum + (e.amount || 0), 0) || 0
       const salaries = salariesRes.data?.reduce((sum, s) => sum + (s.total_amount || 0), 0) || 0
-      const netProfit = revenue - expenses - salaries
+      const refunds = refundsRes.data?.reduce((sum, r) => sum + (r.refund_amount || 0), 0) || 0
+      const netProfit = revenue - expenses - salaries - refunds
 
-      return { revenue, expenses, salaries, netProfit }
+      return { revenue, expenses, salaries, refunds, netProfit }
     },
     enabled: reportType === 'financial',
     staleTime: 0,
+  })
+
+  // Security Deposit Refunds Query
+  const { data: refundsData } = useQuery({
+    queryKey: ['refunds-report', startDate, endDate],
+    queryFn: async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        console.warn('No session found, queries may fail due to RLS')
+      }
+
+      // First, fetch ALL refunded deposits to see what we have (for debugging and comparison)
+      const { data: allRefundedDeposits } = await supabase
+        .from('security_deposits')
+        .select('id, status, updated_at, refund_amount')
+        .eq('status', 'refunded')
+        .order('updated_at', { ascending: false })
+      
+      console.log('All refunded deposits (before date filter):', {
+        count: allRefundedDeposits?.length || 0,
+        deposits: allRefundedDeposits?.map((d: any) => ({
+          id: d.id,
+          status: d.status,
+          updated_at: d.updated_at,
+          refund_amount: d.refund_amount
+        }))
+      })
+      
+      // Convert date strings to ISO format with time for proper comparison
+      const startDateTime = new Date(startDate).toISOString()
+      const endDateTime = new Date(endDate + 'T23:59:59.999Z').toISOString()
+      
+      console.log('Date filter:', { startDate, endDate, startDateTime, endDateTime })
+      
+      // Fetch refunded security deposits within date range
+      const { data: depositsData, error: depositsError } = await supabase
+        .from('security_deposits')
+        .select('*')
+        .eq('status', 'refunded')
+        .gte('updated_at', startDateTime)
+        .lte('updated_at', endDateTime)
+        .order('updated_at', { ascending: false })
+      
+      if (depositsError) {
+        console.error('Refunds report query error:', depositsError)
+        throw depositsError
+      }
+      
+      if (!depositsData || depositsData.length === 0) {
+        console.log('No refunded deposits found in date range', {
+          allRefundedCount: allRefundedDeposits?.length || 0,
+          filteredCount: 0,
+          dateRange: { startDateTime, endDateTime }
+        })
+        
+        // If we have refunds but they're outside the date range, show a warning
+        if (allRefundedDeposits && allRefundedDeposits.length > 0) {
+          console.warn('Refunds exist but are outside the selected date range. Consider expanding the date range.')
+          console.warn('Refund dates:', allRefundedDeposits.map((d: any) => ({
+            id: d.id,
+            updated_at: d.updated_at,
+            isInRange: d.updated_at >= startDateTime && d.updated_at <= endDateTime
+          })))
+        }
+        
+        return { refunds: [], total: 0, allRefundedCount: allRefundedDeposits?.length || 0 }
+      }
+      
+      console.log('Filtered refunded deposits:', {
+        count: depositsData.length,
+        deposits: depositsData.map(d => ({
+          id: d.id,
+          updated_at: d.updated_at,
+          refund_amount: d.refund_amount
+        }))
+      })
+      
+      // Fetch related tenant and unit data
+      const refundsWithRelations = await Promise.all(
+        depositsData.map(async (deposit: any) => {
+          const [tenantRes, unitRes] = await Promise.all([
+            deposit.tenant_id
+              ? supabase
+                  .from('tenants')
+                  .select('name, phone')
+                  .eq('id', deposit.tenant_id)
+                  .single()
+                  .then(res => {
+                    // If tenant not found (might be archived), return null gracefully
+                    if (res.error && res.error.code === 'PGRST116') {
+                      return { data: null, error: null }
+                    }
+                    return res
+                  })
+              : Promise.resolve({ data: null, error: null }),
+            deposit.unit_id
+              ? supabase
+                  .from('units')
+                  .select('unit_number, building_id')
+                  .eq('id', deposit.unit_id)
+                  .single()
+              : Promise.resolve({ data: null, error: null })
+          ])
+          
+          // Get building name
+          let buildingName = null
+          if (unitRes.data?.building_id) {
+            const { data: buildingData } = await supabase
+              .from('buildings')
+              .select('name')
+              .eq('id', unitRes.data.building_id)
+              .single()
+            
+            buildingName = buildingData?.name || null
+          }
+          
+          return {
+            ...deposit,
+            tenants: tenantRes.data ? { name: tenantRes.data.name, phone: tenantRes.data.phone } : null,
+            units: unitRes.data ? {
+              unit_number: unitRes.data.unit_number,
+              buildings: buildingName ? { name: buildingName } : null
+            } : null
+          }
+        })
+      )
+      
+      const total = refundsWithRelations.reduce((sum, r) => sum + (r.refund_amount || 0), 0)
+      
+      console.log('Refunds report:', { 
+        refunds: refundsWithRelations.length, 
+        total, 
+        startDateTime, 
+        endDateTime,
+        depositsFound: depositsData.length,
+        allRefundedCount: allRefundedDeposits?.length || 0,
+        sampleDeposit: depositsData[0] ? {
+          id: depositsData[0].id,
+          status: depositsData[0].status,
+          refund_amount: depositsData[0].refund_amount,
+          updated_at: depositsData[0].updated_at
+        } : null
+      })
+      
+      return { 
+        refunds: refundsWithRelations, 
+        total,
+        allRefundedCount: allRefundedDeposits?.length || 0
+      }
+    },
+    enabled: reportType === 'refunds',
+    staleTime: 0,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   })
 
   const handleExportExcel = () => {
@@ -439,6 +632,20 @@ export default function Reports() {
         })),
         'inventory-report'
       )
+    } else if (reportType === 'refunds' && refundsData) {
+      exportToExcel(
+        refundsData.refunds.map((r: any) => ({
+          'Date Refunded': formatDate(r.updated_at),
+          Tenant: r.tenants?.name || 'N/A',
+          'Tenant Phone': r.tenants?.phone || 'N/A',
+          Unit: r.units?.unit_number || 'N/A',
+          Building: r.units?.buildings?.name || 'N/A',
+          'Deposit Amount': r.amount,
+          Deductions: r.total_deductions || 0,
+          'Refund Amount': r.refund_amount || 0,
+        })),
+        'refunds-report'
+      )
     }
   }
 
@@ -500,6 +707,12 @@ export default function Reports() {
             className={`btn ${reportType === 'financial' ? 'btn-primary' : 'btn-ghost'}`}
           >
             Financial Summary
+          </button>
+          <button
+            onClick={() => setReportType('refunds')}
+            className={`btn ${reportType === 'refunds' ? 'btn-primary' : 'btn-ghost'}`}
+          >
+            Security Deposit Refunds
           </button>
         </div>
 
@@ -900,7 +1113,7 @@ export default function Reports() {
                 <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="input" />
               </div>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
               <div className="p-4 bg-green-50 dark:bg-green-950/40 rounded-lg">
                 <p className="text-sm text-gray-600 dark:text-zinc-400 mb-1">Total Revenue</p>
                 <p className="text-2xl font-bold text-green-600 dark:text-green-400">{formatCurrency(financialData?.revenue || 0)}</p>
@@ -913,6 +1126,15 @@ export default function Reports() {
                 <p className="text-sm text-gray-600 dark:text-zinc-400 mb-1">Total Salaries</p>
                 <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{formatCurrency(financialData?.salaries || 0)}</p>
               </div>
+              <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 rounded-lg">
+                <p className="text-sm text-gray-600 dark:text-zinc-400 mb-1">Security Deposit Refunds</p>
+                <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(financialData?.refunds || 0)}</p>
+              </div>
+              <div className="p-4 bg-purple-50 dark:bg-purple-950/40 rounded-lg">
+                <p className="text-sm text-gray-600 dark:text-zinc-400 mb-1">Security Deposits Held</p>
+                <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">{formatCurrency(depositsHeldData?.netHeld || 0)}</p>
+                <p className="text-xs text-gray-500 dark:text-zinc-500 mt-1">{depositsHeldData?.count || 0} active deposits</p>
+              </div>
               <div className={`p-4 rounded-lg ${(financialData?.netProfit || 0) >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/40' : 'bg-red-50 dark:bg-red-950/40'}`}>
                 <p className="text-sm text-gray-600 dark:text-zinc-400 mb-1">Net Profit</p>
                 <p className={`text-2xl font-bold ${(financialData?.netProfit || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
@@ -920,28 +1142,140 @@ export default function Reports() {
                 </p>
               </div>
             </div>
-            <div className="p-6 bg-slate-50 dark:bg-zinc-900 rounded-xl">
-              <h3 className="font-semibold text-slate-900 dark:text-zinc-50 mb-4">Financial Summary</h3>
-              <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-slate-600 dark:text-zinc-400">Revenue:</span>
-                  <span className="font-semibold text-green-600 dark:text-green-400">{formatCurrency(financialData?.revenue || 0)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-600 dark:text-zinc-400">Expenses:</span>
-                  <span className="font-semibold text-red-600 dark:text-red-400">-{formatCurrency(financialData?.expenses || 0)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-600 dark:text-zinc-400">Salaries:</span>
-                  <span className="font-semibold text-blue-600 dark:text-blue-400">-{formatCurrency(financialData?.salaries || 0)}</span>
-                </div>
-                <div className="pt-2 border-t border-slate-200 dark:border-zinc-800 flex justify-between">
-                  <span className="font-bold text-slate-900 dark:text-zinc-50">Net Profit:</span>
-                  <span className={`font-bold ${(financialData?.netProfit || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                    {formatCurrency(financialData?.netProfit || 0)}
-                  </span>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="p-6 bg-slate-50 dark:bg-zinc-900 rounded-xl">
+                <h3 className="font-semibold text-slate-900 dark:text-zinc-50 mb-4">Period Summary</h3>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-slate-600 dark:text-zinc-400">Revenue:</span>
+                    <span className="font-semibold text-green-600 dark:text-green-400">{formatCurrency(financialData?.revenue || 0)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-600 dark:text-zinc-400">Expenses:</span>
+                    <span className="font-semibold text-red-600 dark:text-red-400">-{formatCurrency(financialData?.expenses || 0)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-600 dark:text-zinc-400">Salaries:</span>
+                    <span className="font-semibold text-blue-600 dark:text-blue-400">-{formatCurrency(financialData?.salaries || 0)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-600 dark:text-zinc-400">Security Deposit Refunds:</span>
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">-{formatCurrency(financialData?.refunds || 0)}</span>
+                  </div>
+                  <div className="pt-2 border-t border-slate-200 dark:border-zinc-800 flex justify-between">
+                    <span className="font-bold text-slate-900 dark:text-zinc-50">Net Profit:</span>
+                    <span className={`font-bold ${(financialData?.netProfit || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                      {formatCurrency(financialData?.netProfit || 0)}
+                    </span>
+                  </div>
                 </div>
               </div>
+              <div className="p-6 bg-purple-50 dark:bg-purple-950/40 rounded-xl">
+                <h3 className="font-semibold text-slate-900 dark:text-zinc-50 mb-4">Security Deposits Held</h3>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-slate-600 dark:text-zinc-400">Total Deposits:</span>
+                    <span className="font-semibold text-purple-600 dark:text-purple-400">{formatCurrency(depositsHeldData?.totalHeld || 0)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-600 dark:text-zinc-400">Total Deductions:</span>
+                    <span className="font-semibold text-red-600 dark:text-red-400">-{formatCurrency(depositsHeldData?.totalDeductions || 0)}</span>
+                  </div>
+                  <div className="pt-2 border-t border-purple-200 dark:border-purple-800 flex justify-between">
+                    <span className="font-bold text-slate-900 dark:text-zinc-50">Net Held:</span>
+                    <span className="font-bold text-purple-600 dark:text-purple-400">
+                      {formatCurrency(depositsHeldData?.netHeld || 0)}
+                    </span>
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-purple-200 dark:border-purple-800">
+                    <p className="text-sm text-slate-600 dark:text-zinc-400">
+                      Active Deposits: <span className="font-semibold text-purple-600 dark:text-purple-400">{depositsHeldData?.count || 0}</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {reportType === 'refunds' && (
+          <div className="space-y-6">
+            <div className="flex items-center gap-4 flex-wrap">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-zinc-200 mb-2">Start Date</label>
+                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="input" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-zinc-200 mb-2">End Date</label>
+                <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="input" />
+              </div>
+              <div className="flex items-end">
+                <button
+                  onClick={() => {
+                    // Set date range to last 20 years to show all refunds
+                    const twentyYearsAgo = new Date()
+                    twentyYearsAgo.setFullYear(twentyYearsAgo.getFullYear() - 20)
+                    setStartDate(twentyYearsAgo.toISOString().split('T')[0])
+                    setEndDate(new Date(new Date().getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0])
+                  }}
+                  className="btn btn-secondary text-sm"
+                >
+                  Show All Refunds
+                </button>
+              </div>
+            </div>
+            
+            {refundsData && refundsData.allRefundedCount > refundsData.refunds.length && (
+              <div className="bg-yellow-50 dark:bg-yellow-950/40 border border-yellow-200 dark:border-yellow-800/50 rounded-lg p-4">
+                <p className="text-sm text-yellow-800 dark:text-yellow-300">
+                  <strong>Note:</strong> There are {refundsData.allRefundedCount} total refunds, but only {refundsData.refunds.length} are shown in the selected date range. 
+                  Click "Show All Refunds" to see all refunds.
+                </p>
+              </div>
+            )}
+            <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/50 rounded-lg p-4 mb-6">
+              <p className="text-sm text-emerald-800 dark:text-emerald-300 mb-1">Total Refunds</p>
+              <p className="text-3xl font-bold text-emerald-900 dark:text-emerald-200">
+                {formatCurrency(refundsData?.total || 0)}
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Date Refunded</th>
+                    <th>Tenant</th>
+                    <th>Unit</th>
+                    <th>Deposit Amount</th>
+                    <th>Deductions</th>
+                    <th>Refund Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {refundsData?.refunds.map((refund: any) => (
+                    <tr key={refund.id}>
+                      <td>{formatDate(refund.updated_at)}</td>
+                      <td>
+                        <div>
+                          <div className="font-medium">{refund.tenants?.name || 'N/A'}</div>
+                          <div className="text-xs text-slate-500">{refund.tenants?.phone || ''}</div>
+                        </div>
+                      </td>
+                      <td>
+                        {refund.units?.unit_number || 'N/A'} 
+                        {refund.units?.buildings?.name && ` (${refund.units.buildings.name})`}
+                      </td>
+                      <td>{formatCurrency(refund.amount)}</td>
+                      <td className="text-red-600 dark:text-red-400">
+                        {formatCurrency(refund.total_deductions || 0)}
+                      </td>
+                      <td className="font-bold text-emerald-600 dark:text-emerald-400">
+                        {formatCurrency(refund.refund_amount || 0)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         )}

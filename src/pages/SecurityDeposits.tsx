@@ -127,34 +127,90 @@ export default function SecurityDeposits() {
         if (arrearsError) throw arrearsError
       }
 
-      // Update deposit status to 'refunded' if refund amount > 0, otherwise 'forfeited'
-      const { data: updatedDeposit } = await supabase
+      // Wait a moment for database triggers to update total_deductions
+      // Then fetch the updated deposit to get the correct refund_amount
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      // Fetch the updated deposit with all calculated fields
+      const { data: updatedDeposit, error: fetchError } = await supabase
         .from('security_deposits')
-        .select('refund_amount')
+        .select('refund_amount, amount, total_deductions')
         .eq('id', depositId)
         .single()
 
-      const status = (updatedDeposit?.refund_amount || 0) > 0 ? 'refunded' : 'forfeited'
+      if (fetchError) throw fetchError
 
+      // Calculate refund amount: amount - total_deductions
+      // Use the calculated refund_amount from the database (generated column)
+      // or calculate it manually if needed
+      const refundAmount = updatedDeposit?.refund_amount ?? 
+        ((updatedDeposit?.amount || 0) - (updatedDeposit?.total_deductions || 0))
+      
+      const status = refundAmount > 0 ? 'refunded' : 'forfeited'
+      
+      console.log('Processing refund:', {
+        depositId,
+        amount: updatedDeposit?.amount,
+        totalDeductions: updatedDeposit?.total_deductions,
+        refundAmount,
+        status
+      })
+
+      // Explicitly set updated_at to ensure it's updated for the reports query
+      const now = new Date().toISOString()
       const { error: updateError } = await supabase
         .from('security_deposits')
         .update({ 
           status,
-          notes: `Lease ended. ${damagesDescription || ''}`
+          notes: `Lease ended. ${damagesDescription || ''}`,
+          updated_at: now
         })
         .eq('id', depositId)
 
       if (updateError) throw updateError
+      
+      console.log('Deposit updated:', { depositId, status, updated_at: now, refundAmount })
+
+      // If refund was processed (status is 'refunded'), archive tenant and mark unit as vacant
+      if (status === 'refunded') {
+        // Archive the tenant (set status to 'inactive')
+        const { error: tenantUpdateError } = await supabase
+          .from('tenants')
+          .update({ 
+            status: 'inactive',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', depositData.tenant_id)
+
+        if (tenantUpdateError) throw tenantUpdateError
+
+        // Mark unit as vacant and remove tenant assignment
+        const { error: unitUpdateError } = await supabase
+          .from('units')
+          .update({ 
+            status: 'vacant',
+            tenant_id: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', depositData.unit_id)
+
+        if (unitUpdateError) throw unitUpdateError
+      }
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['security-deposits'] })
       await queryClient.invalidateQueries({ queryKey: ['security-deposit-deductions'] })
+      await queryClient.invalidateQueries({ queryKey: ['tenants'] })
+      await queryClient.invalidateQueries({ queryKey: ['units'] })
+      await queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
+      await queryClient.invalidateQueries({ queryKey: ['refunds-report'] })
+      await queryClient.invalidateQueries({ queryKey: ['financial-summary'] })
       setShowLeaseEndModal(false)
       setSelectedDeposit(null)
       setDamagesAmount('')
       setDamagesDescription('')
       setError(null)
-      alert('Lease end processed successfully!')
+      alert('Lease end processed successfully! Tenant archived and unit marked as vacant.')
     },
     onError: (error: any) => {
       console.error('Failed to process lease end:', error)

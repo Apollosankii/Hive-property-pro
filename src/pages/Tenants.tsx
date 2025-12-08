@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, Tenant } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/utils'
-import { importTenantsFromExcel } from '@/lib/excel-import'
+import { importTenantsFromFile } from '@/lib/excel-import'
 import { Plus, Edit, User, Search, AlertCircle, X, Upload, FileSpreadsheet } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
@@ -18,6 +18,7 @@ export default function Tenants() {
   const [emergencyContactName, setEmergencyContactName] = useState('')
   const [emergencyContactPhone, setEmergencyContactPhone] = useState('')
   const [emergencyContactRelationship, setEmergencyContactRelationship] = useState('')
+  const [securityDepositAmount, setSecurityDepositAmount] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [showImportModal, setShowImportModal] = useState(false)
   const [importFile, setImportFile] = useState<File | null>(null)
@@ -94,10 +95,11 @@ export default function Tenants() {
         console.warn('No session found, queries may fail due to RLS')
       }
 
-      // Fetch tenants first
+      // Fetch only active tenants (exclude archived/inactive tenants)
       const { data: tenantsData, error: tenantsError } = await supabase
         .from('tenants')
         .select('*')
+        .eq('status', 'active')
         .order('created_at', { ascending: false })
       
       if (tenantsError) {
@@ -181,8 +183,10 @@ export default function Tenants() {
   }
 
   const createMutation = useMutation({
-    mutationFn: async (newTenant: Partial<Tenant> & { id_photo_url?: string }) => {
-      const { data, error } = await supabase
+    mutationFn: async (data: { tenant: Partial<Tenant> & { id_photo_url?: string }, securityDepositAmount?: string }) => {
+      const { tenant: newTenant, securityDepositAmount: depositAmountStr } = data
+      
+      const { data: tenantData, error } = await supabase
         .from('tenants')
         .insert([newTenant])
         .select()
@@ -197,7 +201,7 @@ export default function Tenants() {
       if (newTenant.unit_id) {
         const { error: unitError } = await supabase
           .from('units')
-          .update({ status: 'occupied', tenant_id: data.id })
+          .update({ status: 'occupied', tenant_id: tenantData.id })
           .eq('id', newTenant.unit_id)
 
         if (unitError) {
@@ -206,19 +210,29 @@ export default function Tenants() {
         }
 
         // Create security deposit record
+        // Use form value if provided, otherwise use unit's default, or 0 if neither
+        const depositAmount = parseFloat(depositAmountStr || '0') || 0
+        
+        // Get unit's default security deposit amount
         const { data: unitData } = await supabase
           .from('units')
           .select('security_deposit_amount')
           .eq('id', newTenant.unit_id)
           .single()
 
-        if (unitData && unitData.security_deposit_amount > 0) {
+        // Use form value if provided, otherwise unit's default
+        const finalDepositAmount = depositAmount > 0 
+          ? depositAmount 
+          : (unitData?.security_deposit_amount || 0)
+
+        // Always create security deposit record (even if 0) for tracking
+        if (finalDepositAmount >= 0) {
           const { error: depositError } = await supabase
             .from('security_deposits')
             .insert([{
-              tenant_id: data.id,
+              tenant_id: tenantData.id,
               unit_id: newTenant.unit_id,
-              amount: unitData.security_deposit_amount,
+              amount: finalDepositAmount,
               date_deposited: new Date().toISOString().split('T')[0],
               status: 'active'
             }])
@@ -226,17 +240,22 @@ export default function Tenants() {
           if (depositError) {
             console.error('Create security deposit error:', depositError)
             // Don't throw - tenant creation succeeded, deposit is optional
+          } else {
+            console.log('Security deposit created:', { tenant_id: tenantData.id, amount: finalDepositAmount })
           }
         }
       }
 
-      return data
+      return tenantData
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['tenants'] })
       await queryClient.invalidateQueries({ queryKey: ['units'] })
       await queryClient.invalidateQueries({ queryKey: ['occupied-units'] })
       await queryClient.invalidateQueries({ queryKey: ['occupancy-report'] })
+      await queryClient.invalidateQueries({ queryKey: ['security-deposits'] })
+      await queryClient.invalidateQueries({ queryKey: ['security-deposits-held'] })
+      await queryClient.invalidateQueries({ queryKey: ['financial-summary'] })
       await queryClient.refetchQueries({ queryKey: ['tenants'] })
       await queryClient.refetchQueries({ queryKey: ['units'] })
       await queryClient.refetchQueries({ queryKey: ['occupied-units'] })
@@ -368,7 +387,7 @@ export default function Tenants() {
           ...tenantData 
         })
       } else {
-        createMutation.mutate(tenantData)
+        createMutation.mutate({ tenant: tenantData, securityDepositAmount })
       }
     } catch (err: any) {
       setError(err.message || 'An error occurred. Please try again.')
@@ -389,7 +408,7 @@ export default function Tenants() {
 
   const handleImport = async () => {
     if (!importFile) {
-      setError('Please select an Excel file')
+      setError('Please select a file (Excel)')
       return
     }
 
@@ -399,7 +418,7 @@ export default function Tenants() {
     setImportResult(null)
 
     try {
-      const result = await importTenantsFromExcel(importFile, (progress, message) => {
+      const result = await importTenantsFromFile(importFile, (progress, message) => {
         setImportProgress(progress)
         setImportMessage(message)
       })
@@ -667,7 +686,16 @@ export default function Tenants() {
                   )}
                   <select
                     value={unitId}
-                    onChange={(e) => setUnitId(e.target.value)}
+                    onChange={(e) => {
+                      setUnitId(e.target.value)
+                      // Auto-populate security deposit from unit if available
+                      if (e.target.value) {
+                        const selectedUnit = units?.find((u: any) => u.id === e.target.value)
+                        if (selectedUnit?.security_deposit_amount) {
+                          setSecurityDepositAmount(selectedUnit.security_deposit_amount.toString())
+                        }
+                      }
+                    }}
                     required
                     className="input"
                   >
@@ -690,6 +718,27 @@ export default function Tenants() {
                     </p>
                   )}
                 </div>
+                {!editingTenant && (
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-200 mb-2">
+                      Security Deposit Amount (KES)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={securityDepositAmount}
+                      onChange={(e) => setSecurityDepositAmount(e.target.value)}
+                      className="input"
+                      placeholder="Enter amount or leave blank to use unit default"
+                    />
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                      {unitId && units?.find((u: any) => u.id === unitId)?.security_deposit_amount 
+                        ? `Unit default: ${formatCurrency(units.find((u: any) => u.id === unitId).security_deposit_amount)}`
+                        : 'Enter the security deposit amount paid by the tenant'}
+                    </p>
+                  </div>
+                )}
                 <div className="border-t border-slate-200 pt-5">
                   <h3 className="text-lg font-semibold text-slate-900 mb-4">Emergency Contact</h3>
                   <div className="space-y-4">
@@ -841,7 +890,10 @@ export default function Tenants() {
                     className="input"
                   />
                   <p className="text-xs text-slate-500 mt-2">
-                    Expected columns: Unit, Names (or Name), Phone, Email (optional), Emergency Contact Name (optional), Emergency Contact Phone (optional), Emergency Contact Relationship (optional)
+                    <strong>Expected columns:</strong> Unit, Names (or Name), Phone, Email (optional), 
+                    Emergency Contact Name (optional), Emergency Contact Phone (optional), 
+                    Emergency Contact Relationship (optional)<br />
+                    <strong>Note:</strong> Names can include phone numbers in format "Name (Phone)" or "Name Phone"
                   </p>
                 </div>
 
