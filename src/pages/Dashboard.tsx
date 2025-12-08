@@ -159,7 +159,7 @@ export default function Dashboard() {
                 </div>
                 <div>
                   <p className="text-sm font-medium text-slate-600 dark:text-zinc-400 mb-1">{stat.title}</p>
-                  <p className="text-3xl font-bold text-slate-900 dark:text-zinc-50">{stat.value}</p>
+                  <p className="text-xl font-bold text-slate-900 dark:text-zinc-50">{stat.value}</p>
                 </div>
               </div>
             </Link>
@@ -179,7 +179,7 @@ export default function Dashboard() {
             </div>
             <div>
               <p className="text-sm font-medium text-slate-600 dark:text-zinc-400 mb-1">Active Employees</p>
-              <p className="text-3xl font-bold text-slate-900 dark:text-zinc-50">{stats?.totalEmployees || 0}</p>
+              <p className="text-xl font-bold text-slate-900 dark:text-zinc-50">{stats?.totalEmployees || 0}</p>
             </div>
           </div>
         </Link>
@@ -194,7 +194,7 @@ export default function Dashboard() {
             </div>
             <div>
               <p className="text-sm font-medium text-slate-600 dark:text-zinc-400 mb-1">Total Expenses</p>
-              <p className="text-3xl font-bold text-slate-900 dark:text-zinc-50">{formatCurrency(stats?.totalExpenses || 0)}</p>
+              <p className="text-xl font-bold text-slate-900 dark:text-zinc-50">{formatCurrency(stats?.totalExpenses || 0)}</p>
             </div>
           </div>
         </Link>
@@ -209,7 +209,7 @@ export default function Dashboard() {
             </div>
             <div>
               <p className="text-sm font-medium text-slate-600 dark:text-zinc-400 mb-1">Inventory Value</p>
-              <p className="text-3xl font-bold text-slate-900 dark:text-zinc-50">{formatCurrency(stats?.inventoryValue || 0)}</p>
+              <p className="text-xl font-bold text-slate-900 dark:text-zinc-50">{formatCurrency(stats?.inventoryValue || 0)}</p>
               {(stats?.lowStockItems || 0) > 0 && (
                 <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">{stats?.lowStockItems || 0} items need restocking</p>
               )}
@@ -227,7 +227,7 @@ export default function Dashboard() {
             </div>
             <div>
               <p className="text-sm font-medium text-slate-600 dark:text-zinc-400 mb-1">Net Profit</p>
-              <p className={`text-3xl font-bold ${(stats?.netProfit || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+              <p className={`text-xl font-bold ${(stats?.netProfit || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                 {formatCurrency(stats?.netProfit || 0)}
               </p>
             </div>
@@ -276,19 +276,19 @@ export default function Dashboard() {
           <div className="space-y-4">
             <div className="p-4 bg-gradient-to-br from-emerald-50 dark:from-emerald-950/40 to-emerald-100/50 dark:to-emerald-900/30 rounded-xl border border-emerald-200 dark:border-emerald-800/50">
               <p className="text-sm text-slate-600 dark:text-zinc-400 mb-1">Total Revenue</p>
-              <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">
+              <p className="text-lg font-bold text-emerald-700 dark:text-emerald-400">
                 {formatCurrency(stats?.totalCollected || 0)}
               </p>
             </div>
             <div className="p-4 bg-gradient-to-br from-red-50 dark:from-red-950/40 to-red-100/50 dark:to-red-900/30 rounded-xl border border-red-200 dark:border-red-800/50">
               <p className="text-sm text-slate-600 dark:text-zinc-400 mb-1">Total Expenses</p>
-              <p className="text-2xl font-bold text-red-700 dark:text-red-400">
+              <p className="text-lg font-bold text-red-700 dark:text-red-400">
                 {formatCurrency(stats?.totalExpenses || 0)}
               </p>
             </div>
             <div className="p-4 bg-gradient-to-br from-blue-50 dark:from-blue-950/40 to-blue-100/50 dark:to-blue-900/30 rounded-xl border border-blue-200 dark:border-blue-800/50">
               <p className="text-sm text-slate-600 dark:text-zinc-400 mb-1">Total Salaries</p>
-              <p className="text-2xl font-bold text-blue-700 dark:text-blue-400">
+              <p className="text-lg font-bold text-blue-700 dark:text-blue-400">
                 {formatCurrency(stats?.totalSalariesPaid || 0)}
               </p>
             </div>
@@ -298,7 +298,7 @@ export default function Dashboard() {
                 : 'bg-gradient-to-br from-red-50 dark:from-red-950/40 to-red-100/50 dark:to-red-900/30 border-red-200 dark:border-red-800/50'
             }`}>
               <p className="text-sm text-slate-600 dark:text-zinc-400 mb-1">Net Profit</p>
-              <p className={`text-2xl font-bold ${
+              <p className={`text-lg font-bold ${
                 (stats?.netProfit || 0) >= 0 
                   ? 'text-emerald-700 dark:text-emerald-400' 
                   : 'text-red-700 dark:text-red-400'
@@ -308,7 +308,7 @@ export default function Dashboard() {
             </div>
             <div className="p-4 bg-gradient-to-br from-amber-50 dark:from-amber-950/40 to-amber-100/50 dark:to-amber-900/30 rounded-xl border border-amber-200 dark:border-amber-800/50">
               <p className="text-sm text-slate-600 dark:text-zinc-400 mb-1">Outstanding Balance</p>
-              <p className="text-2xl font-bold text-amber-700 dark:text-amber-400">
+              <p className="text-lg font-bold text-amber-700 dark:text-amber-400">
                 {formatCurrency(stats?.totalOutstanding || 0)}
               </p>
             </div>

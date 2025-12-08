@@ -752,7 +752,7 @@ export default function Reports() {
 
             <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
               <p className="text-sm text-green-800 mb-1">Total Revenue</p>
-              <p className="text-3xl font-bold text-green-900">
+              <p className="text-xl font-bold text-green-900">
                 {formatCurrency(revenueData?.total || 0)}
               </p>
             </div>
@@ -803,7 +803,7 @@ export default function Reports() {
 
             <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-6">
               <p className="text-sm text-red-800 dark:text-red-300 mb-1">Total Outstanding</p>
-              <p className="text-3xl font-bold text-red-900 dark:text-red-200">
+              <p className="text-xl font-bold text-red-900 dark:text-red-200">
                 {formatCurrency(arrearsData?.total || 0)}
               </p>
               <p className="text-xs text-red-700 dark:text-red-400 mt-2">
@@ -889,17 +889,17 @@ export default function Reports() {
                 <div className="grid grid-cols-3 gap-4 mb-6">
                   <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                     <p className="text-sm text-gray-600 dark:text-blue-300">Total Units</p>
-                    <p className="text-3xl font-bold text-slate-900 dark:text-blue-100">{occupancyData.total}</p>
+                    <p className="text-xl font-bold text-slate-900 dark:text-blue-100">{occupancyData.total}</p>
                   </div>
                   <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
                     <p className="text-sm text-gray-600 dark:text-green-300">Occupied</p>
-                    <p className="text-3xl font-bold text-green-600 dark:text-green-400">
+                    <p className="text-xl font-bold text-green-600 dark:text-green-400">
                       {occupancyData.occupied}
                     </p>
                   </div>
                   <div className="p-4 bg-gray-50 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700 rounded-lg">
                     <p className="text-sm text-gray-600 dark:text-zinc-300">Occupancy Rate</p>
-                    <p className="text-3xl font-bold text-slate-900 dark:text-zinc-100">{occupancyData.occupancyRate}%</p>
+                    <p className="text-xl font-bold text-slate-900 dark:text-zinc-100">{occupancyData.occupancyRate}%</p>
                   </div>
                 </div>
 
@@ -958,7 +958,7 @@ export default function Reports() {
             </div>
             <div className="bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/50 rounded-lg p-4 mb-6">
               <p className="text-sm text-blue-800 dark:text-blue-300 mb-1">Total Salaries</p>
-              <p className="text-3xl font-bold text-blue-900 dark:text-blue-200">{formatCurrency(salariesData?.total || 0)}</p>
+              <p className="text-xl font-bold text-blue-900 dark:text-blue-200">{formatCurrency(salariesData?.total || 0)}</p>
             </div>
             <div className="overflow-x-auto">
               <table className="table">
@@ -1018,7 +1018,7 @@ export default function Reports() {
             </div>
             <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50 rounded-lg p-4 mb-6">
               <p className="text-sm text-red-800 dark:text-red-300 mb-1">Total Expenses</p>
-              <p className="text-3xl font-bold text-red-900 dark:text-red-200">{formatCurrency(expensesData?.total || 0)}</p>
+              <p className="text-xl font-bold text-red-900 dark:text-red-200">{formatCurrency(expensesData?.total || 0)}</p>
             </div>
             <div className="overflow-x-auto">
               <table className="table">
@@ -1052,15 +1052,15 @@ export default function Reports() {
             <div className="grid grid-cols-3 gap-4 mb-6">
               <div className="p-4 bg-blue-50 dark:bg-blue-950/40 rounded-lg">
                 <p className="text-sm text-gray-600 dark:text-zinc-400">Total Items</p>
-                <p className="text-3xl font-bold">{inventoryData?.items.length || 0}</p>
+                <p className="text-xl font-bold">{inventoryData?.items.length || 0}</p>
               </div>
               <div className="p-4 bg-green-50 dark:bg-green-950/40 rounded-lg">
                 <p className="text-sm text-gray-600 dark:text-zinc-400">Total Value</p>
-                <p className="text-3xl font-bold text-green-600 dark:text-green-400">{formatCurrency(inventoryData?.totalValue || 0)}</p>
+                <p className="text-xl font-bold text-green-600 dark:text-green-400">{formatCurrency(inventoryData?.totalValue || 0)}</p>
               </div>
               <div className="p-4 bg-amber-50 dark:bg-amber-950/40 rounded-lg">
                 <p className="text-sm text-gray-600 dark:text-zinc-400">Low Stock Items</p>
-                <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{inventoryData?.lowStockCount || 0}</p>
+                <p className="text-xl font-bold text-amber-600 dark:text-amber-400">{inventoryData?.lowStockCount || 0}</p>
               </div>
             </div>
             <div className="overflow-x-auto">
@@ -1116,28 +1116,28 @@ export default function Reports() {
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
               <div className="p-4 bg-green-50 dark:bg-green-950/40 rounded-lg">
                 <p className="text-sm text-gray-600 dark:text-zinc-400 mb-1">Total Revenue</p>
-                <p className="text-2xl font-bold text-green-600 dark:text-green-400">{formatCurrency(financialData?.revenue || 0)}</p>
+                <p className="text-lg font-bold text-green-600 dark:text-green-400">{formatCurrency(financialData?.revenue || 0)}</p>
               </div>
               <div className="p-4 bg-red-50 dark:bg-red-950/40 rounded-lg">
                 <p className="text-sm text-gray-600 dark:text-zinc-400 mb-1">Total Expenses</p>
-                <p className="text-2xl font-bold text-red-600 dark:text-red-400">{formatCurrency(financialData?.expenses || 0)}</p>
+                <p className="text-lg font-bold text-red-600 dark:text-red-400">{formatCurrency(financialData?.expenses || 0)}</p>
               </div>
               <div className="p-4 bg-blue-50 dark:bg-blue-950/40 rounded-lg">
                 <p className="text-sm text-gray-600 dark:text-zinc-400 mb-1">Total Salaries</p>
-                <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{formatCurrency(financialData?.salaries || 0)}</p>
+                <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{formatCurrency(financialData?.salaries || 0)}</p>
               </div>
               <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 rounded-lg">
                 <p className="text-sm text-gray-600 dark:text-zinc-400 mb-1">Security Deposit Refunds</p>
-                <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(financialData?.refunds || 0)}</p>
+                <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(financialData?.refunds || 0)}</p>
               </div>
               <div className="p-4 bg-purple-50 dark:bg-purple-950/40 rounded-lg">
                 <p className="text-sm text-gray-600 dark:text-zinc-400 mb-1">Security Deposits Held</p>
-                <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">{formatCurrency(depositsHeldData?.netHeld || 0)}</p>
+                <p className="text-lg font-bold text-purple-600 dark:text-purple-400">{formatCurrency(depositsHeldData?.netHeld || 0)}</p>
                 <p className="text-xs text-gray-500 dark:text-zinc-500 mt-1">{depositsHeldData?.count || 0} active deposits</p>
               </div>
               <div className={`p-4 rounded-lg ${(financialData?.netProfit || 0) >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/40' : 'bg-red-50 dark:bg-red-950/40'}`}>
                 <p className="text-sm text-gray-600 dark:text-zinc-400 mb-1">Net Profit</p>
-                <p className={`text-2xl font-bold ${(financialData?.netProfit || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                <p className={`text-lg font-bold ${(financialData?.netProfit || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                   {formatCurrency(financialData?.netProfit || 0)}
                 </p>
               </div>
@@ -1235,7 +1235,7 @@ export default function Reports() {
             )}
             <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/50 rounded-lg p-4 mb-6">
               <p className="text-sm text-emerald-800 dark:text-emerald-300 mb-1">Total Refunds</p>
-              <p className="text-3xl font-bold text-emerald-900 dark:text-emerald-200">
+              <p className="text-xl font-bold text-emerald-900 dark:text-emerald-200">
                 {formatCurrency(refundsData?.total || 0)}
               </p>
             </div>
