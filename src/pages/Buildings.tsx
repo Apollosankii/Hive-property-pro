@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase, Building } from '@/lib/supabase'
+import { supabase, Building, getCurrentUserId } from '@/lib/supabase'
 import { Plus, Edit, Trash2, Building2, AlertCircle, X, Home } from 'lucide-react'
 
 interface UnitForm {
@@ -98,19 +98,58 @@ export default function Buildings() {
 
   const createMutation = useMutation({
     mutationFn: async ({ building, units }: { building: { name: string; location: string }, units: UnitForm[] }) => {
-      // Create building first
+      // Get current user ID - verify session first
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session || !session.user) {
+        throw new Error('User not authenticated. Please log in and try again.')
+      }
+      const userId = session.user.id
+      
+      if (!userId) {
+        throw new Error('User ID not found. Please refresh the page and log in again.')
+      }
+
+      console.log('Creating building with user_id:', userId)
+      console.log('Session user:', session.user)
+      
+      // Verify auth.uid() matches our userId (for debugging)
+      const { data: { user: authUser } } = await supabase.auth.getUser()
+      console.log('Auth user ID:', authUser?.id)
+      
+      if (authUser?.id !== userId) {
+        console.warn('User ID mismatch! Session user ID:', userId, 'Auth user ID:', authUser?.id)
+      }
+
+      // Create building - user_id will be set automatically by database trigger
+      // Even if we don't send it, the trigger will set it from auth.uid()
+      const buildingToInsert = {
+        name: building.name.trim(),
+        location: building.location.trim()
+        // user_id will be automatically set by database trigger
+      }
+      
+      // Insert building (trigger will set user_id automatically)
       const { data: buildingData, error: buildingError } = await supabase
         .from('buildings')
-        .insert([building])
-        .select()
+        .insert([buildingToInsert])
+        .select('*')
         .single()
       
       if (buildingError) {
         console.error('Create building error:', buildingError)
+        console.error('Building data attempted:', buildingToInsert)
+        console.error('Current auth.uid():', authUser?.id)
+        console.error('Error code:', buildingError.code)
+        console.error('Error message:', buildingError.message)
+        
+        // Provide more helpful error message
+        if (buildingError.code === '42501') {
+          throw new Error('Row Level Security policy violation. Please ensure you are logged in and the RLS policies are correctly configured. Check the browser console for details.')
+        }
         throw buildingError
       }
 
-      // Create units if any
+      // Create units if any (user_id will be set automatically by trigger)
       if (units.length > 0 && buildingData) {
         const unitsToInsert = units
           .filter(u => u.unit_number.trim() && u.monthly_rent)
@@ -119,6 +158,7 @@ export default function Buildings() {
             unit_number: u.unit_number.trim(),
             monthly_rent: parseFloat(u.monthly_rent) || 0,
             status: 'vacant' as const
+            // user_id will be automatically set by database trigger
           }))
 
         if (unitsToInsert.length > 0) {
@@ -156,6 +196,12 @@ export default function Buildings() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, building, units }: { id: string, building: Partial<Building>, units: UnitForm[] }) => {
+      // Get current user ID
+      const userId = await getCurrentUserId()
+      if (!userId) {
+        throw new Error('User not authenticated')
+      }
+
       // Update building
       const { data: buildingData, error: buildingError } = await supabase
         .from('buildings')
@@ -211,7 +257,7 @@ export default function Buildings() {
             throw updateError
           }
         } else {
-          // Create new unit
+          // Create new unit (user_id will be set automatically by trigger)
           const { error: createError } = await supabase
             .from('units')
             .insert([{
@@ -219,6 +265,7 @@ export default function Buildings() {
               unit_number: unit.unit_number.trim(),
               monthly_rent: parseFloat(unit.monthly_rent) || 0,
               status: 'vacant' as const
+              // user_id will be automatically set by database trigger
             }])
 
           if (createError) {

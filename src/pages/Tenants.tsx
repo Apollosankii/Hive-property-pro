@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, Tenant } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/utils'
 import { importTenantsFromFile } from '@/lib/excel-import'
-import { Plus, Edit, User, Search, AlertCircle, X, Upload, FileSpreadsheet } from 'lucide-react'
+import { Plus, Edit, User, Search, AlertCircle, X, Upload, FileSpreadsheet, Trash2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 export default function Tenants() {
@@ -161,6 +161,28 @@ export default function Tenants() {
         })
       )
       
+      // Sort tenants by unit number in descending order
+      // Tenants without units will appear at the end
+      tenantsWithRelations.sort((a: any, b: any) => {
+        const unitA = a.units?.unit_number
+        const unitB = b.units?.unit_number
+        
+        // If both have units, compare by unit number (descending)
+        if (unitA && unitB) {
+          // Handle numeric and string unit numbers
+          const numA = typeof unitA === 'string' ? parseFloat(unitA) || 0 : unitA
+          const numB = typeof unitB === 'string' ? parseFloat(unitB) || 0 : unitB
+          return numB - numA // Descending order
+        }
+        
+        // If only one has a unit, prioritize it
+        if (unitA && !unitB) return -1
+        if (!unitA && unitB) return 1
+        
+        // If neither has a unit, maintain original order
+        return 0
+      })
+      
       return tenantsWithRelations
     },
     staleTime: 0,
@@ -186,9 +208,17 @@ export default function Tenants() {
     mutationFn: async (data: { tenant: Partial<Tenant> & { id_photo_url?: string }, securityDepositAmount?: string }) => {
       const { tenant: newTenant, securityDepositAmount: depositAmountStr } = data
       
+      // Get current user ID
+      const { data: { session } } = await supabase.auth.getSession()
+      const userId = session?.user?.id
+      if (!userId) {
+        throw new Error('User not authenticated')
+      }
+      
+      // Insert tenant (user_id will be set automatically by trigger)
       const { data: tenantData, error } = await supabase
         .from('tenants')
-        .insert([newTenant])
+        .insert([{ ...newTenant }])
         .select()
         .single()
       
@@ -226,6 +256,7 @@ export default function Tenants() {
           : (unitData?.security_deposit_amount || 0)
 
         // Always create security deposit record (even if 0) for tracking
+        // user_id will be set automatically by trigger
         if (finalDepositAmount >= 0) {
           const { error: depositError } = await supabase
             .from('security_deposits')
@@ -235,6 +266,7 @@ export default function Tenants() {
               amount: finalDepositAmount,
               date_deposited: new Date().toISOString().split('T')[0],
               status: 'active'
+              // user_id will be automatically set by database trigger
             }])
 
           if (depositError) {
@@ -334,6 +366,68 @@ export default function Tenants() {
       setError(error.message || 'Failed to update tenant. Please check your Supabase configuration.')
     },
   })
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      // First, get the tenant to check if they have a unit assigned
+      const { data: tenant, error: fetchError } = await supabase
+        .from('tenants')
+        .select('unit_id')
+        .eq('id', id)
+        .single()
+
+      if (fetchError) {
+        console.error('Fetch tenant error:', fetchError)
+        throw fetchError
+      }
+
+      // Delete the tenant
+      const { error: deleteError } = await supabase
+        .from('tenants')
+        .delete()
+        .eq('id', id)
+
+      if (deleteError) {
+        console.error('Delete tenant error:', deleteError)
+        throw deleteError
+      }
+
+      // If tenant had a unit assigned, free it up
+      if (tenant?.unit_id) {
+        const { error: unitError } = await supabase
+          .from('units')
+          .update({ status: 'vacant', tenant_id: null })
+          .eq('id', tenant.unit_id)
+
+        if (unitError) {
+          console.error('Update unit error:', unitError)
+          // Don't throw - tenant is already deleted
+        }
+      }
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['tenants'] })
+      await queryClient.invalidateQueries({ queryKey: ['units'] })
+      await queryClient.invalidateQueries({ queryKey: ['occupied-units'] })
+      await queryClient.invalidateQueries({ queryKey: ['occupancy-report'] })
+      await queryClient.invalidateQueries({ queryKey: ['security-deposits'] })
+      await queryClient.invalidateQueries({ queryKey: ['security-deposits-held'] })
+      await queryClient.refetchQueries({ queryKey: ['tenants'] })
+      await queryClient.refetchQueries({ queryKey: ['units'] })
+      await queryClient.refetchQueries({ queryKey: ['occupied-units'] })
+      setError(null)
+    },
+    onError: (error: any) => {
+      console.error('Failed to delete tenant:', error)
+      setError(error.message || 'Failed to delete tenant. Please check your Supabase configuration.')
+    },
+  })
+
+  const handleDelete = (tenant: any) => {
+    if (window.confirm(`Are you sure you want to delete tenant "${tenant.name}"? This action cannot be undone.`)) {
+      deleteMutation.mutate(tenant.id)
+    }
+  }
 
   const resetForm = () => {
     setName('')
@@ -567,13 +661,23 @@ export default function Tenants() {
                         </span>
                       </td>
                       <td>
-                        <button
-                          onClick={() => handleEdit(tenant)}
-                          className="p-1 text-gray-600 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-zinc-800 rounded transition-all"
-                          title="Edit"
-                        >
-                          <Edit size={14} />
-                        </button>
+                        <div className="flex gap-2 items-center">
+                          <button
+                            onClick={() => handleEdit(tenant)}
+                            className="p-1 text-gray-600 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-zinc-800 rounded transition-all"
+                            title="Edit"
+                          >
+                            <Edit size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(tenant)}
+                            className="p-1 text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-all"
+                            title="Delete"
+                            disabled={deleteMutation.isPending}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )

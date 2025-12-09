@@ -556,6 +556,37 @@ export default function Billing() {
     },
   })
 
+  // Function to fetch latest meter readings for a unit
+  const fetchLatestMeterReadings = async (unitId: string) => {
+    try {
+      // Get the most recent bill for this unit (excluding the current month if editing)
+      const { data: latestBill, error } = await supabase
+        .from('bills')
+        .select('water_current_reading, elec_current_reading, billing_month')
+        .eq('unit_id', unitId)
+        .order('billing_month', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error fetching latest meter readings:', error)
+        return { water: 0, elec: 0 }
+      }
+
+      if (latestBill) {
+        return {
+          water: latestBill.water_current_reading || 0,
+          elec: latestBill.elec_current_reading || 0,
+        }
+      }
+
+      return { water: 0, elec: 0 }
+    } catch (err) {
+      console.error('Error fetching latest meter readings:', err)
+      return { water: 0, elec: 0 }
+    }
+  }
+
   const handleEditBill = (bill: any) => {
     setEditingBill(bill)
     setBillFormData({
@@ -1395,15 +1426,16 @@ export default function Billing() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Water Previous Reading
+                      Water Previous Reading <span className="text-xs text-slate-500 font-normal">(Read-only)</span>
                     </label>
                     <input
                       type="number"
                       step="0.01"
                       value={billFormData.water_prev_reading}
                       onChange={(e) => setBillFormData({ ...billFormData, water_prev_reading: e.target.value })}
-                      className="input"
-                      required
+                      className="input bg-slate-50 dark:bg-zinc-900"
+                      readOnly
+                      title="Previous reading from this bill"
                     />
                   </div>
                   <div>
@@ -1414,10 +1446,18 @@ export default function Billing() {
                       type="number"
                       step="0.01"
                       value={billFormData.water_current_reading}
-                      onChange={(e) => setBillFormData({ ...billFormData, water_current_reading: e.target.value })}
+                      onChange={(e) => {
+                        const currentReading = e.target.value
+                        setBillFormData({ ...billFormData, water_current_reading: currentReading })
+                      }}
                       className="input"
                       required
                     />
+                    {billFormData.water_current_reading && billFormData.water_prev_reading && (
+                      <p className="text-xs text-slate-500 mt-1">
+                        Units: {Math.max(0, parseFloat(billFormData.water_current_reading) - parseFloat(billFormData.water_prev_reading)).toFixed(2)} × {billFormData.water_rate} = {formatCurrency(Math.max(0, parseFloat(billFormData.water_current_reading) - parseFloat(billFormData.water_prev_reading)) * parseFloat(billFormData.water_rate || '50'))}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -1426,23 +1466,25 @@ export default function Billing() {
                     <input
                       type="number"
                       step="0.01"
+                      min="0"
                       value={billFormData.water_rate}
                       onChange={(e) => setBillFormData({ ...billFormData, water_rate: e.target.value })}
                       className="input"
-                      required
+                      placeholder="50"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Electricity Previous Reading
+                      Electricity Previous Reading <span className="text-xs text-slate-500 font-normal">(Read-only)</span>
                     </label>
                     <input
                       type="number"
                       step="0.01"
                       value={billFormData.elec_prev_reading}
                       onChange={(e) => setBillFormData({ ...billFormData, elec_prev_reading: e.target.value })}
-                      className="input"
-                      required
+                      className="input bg-slate-50 dark:bg-zinc-900"
+                      readOnly
+                      title="Previous reading from this bill"
                     />
                   </div>
                   <div>
@@ -1453,10 +1495,18 @@ export default function Billing() {
                       type="number"
                       step="0.01"
                       value={billFormData.elec_current_reading}
-                      onChange={(e) => setBillFormData({ ...billFormData, elec_current_reading: e.target.value })}
+                      onChange={(e) => {
+                        const currentReading = e.target.value
+                        setBillFormData({ ...billFormData, elec_current_reading: currentReading })
+                      }}
                       className="input"
                       required
                     />
+                    {billFormData.elec_current_reading && billFormData.elec_prev_reading && (
+                      <p className="text-xs text-slate-500 mt-1">
+                        Units: {Math.max(0, parseFloat(billFormData.elec_current_reading) - parseFloat(billFormData.elec_prev_reading)).toFixed(2)} × {billFormData.elec_rate} = {formatCurrency(Math.max(0, parseFloat(billFormData.elec_current_reading) - parseFloat(billFormData.elec_prev_reading)) * parseFloat(billFormData.elec_rate || '15'))}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -1465,10 +1515,11 @@ export default function Billing() {
                     <input
                       type="number"
                       step="0.01"
+                      min="0"
                       value={billFormData.elec_rate}
                       onChange={(e) => setBillFormData({ ...billFormData, elec_rate: e.target.value })}
                       className="input"
-                      required
+                      placeholder="15"
                     />
                   </div>
                   <div>
@@ -1813,6 +1864,11 @@ export default function Billing() {
                           rent_amount: unit.monthly_rent?.toString() || ''
                         }
 
+                        // Fetch latest meter readings for this unit
+                        const latestReadings = await fetchLatestMeterReadings(unit.id)
+                        newFormData.water_prev_reading = latestReadings.water.toString()
+                        newFormData.elec_prev_reading = latestReadings.elec.toString()
+
                         // Auto-calculate arrears from previous month
                         const prevMonth = new Date(selectedMonth + '-01')
                         prevMonth.setMonth(prevMonth.getMonth() - 1)
@@ -1890,29 +1946,39 @@ export default function Billing() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Water Previous Reading
+                      Water Previous Reading <span className="text-xs text-slate-500 font-normal">(Auto-filled)</span>
                     </label>
                     <input
                       type="number"
                       step="0.01"
                       value={billFormData.water_prev_reading}
                       onChange={(e) => setBillFormData({ ...billFormData, water_prev_reading: e.target.value })}
-                      className="input"
-                      required
+                      className="input bg-slate-50 dark:bg-zinc-900"
+                      readOnly
+                      title="Automatically filled from the most recent bill for this unit"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Water Current Reading
+                      Water Current Reading <span className="text-xs text-green-600 font-normal">(Enter current)</span>
                     </label>
                     <input
                       type="number"
                       step="0.01"
                       value={billFormData.water_current_reading}
-                      onChange={(e) => setBillFormData({ ...billFormData, water_current_reading: e.target.value })}
+                      onChange={(e) => {
+                        const currentReading = e.target.value
+                        setBillFormData({ ...billFormData, water_current_reading: currentReading })
+                      }}
                       className="input"
                       required
+                      placeholder="Enter current reading"
                     />
+                    {billFormData.water_current_reading && billFormData.water_prev_reading && (
+                      <p className="text-xs text-slate-500 mt-1">
+                        Units: {Math.max(0, parseFloat(billFormData.water_current_reading) - parseFloat(billFormData.water_prev_reading)).toFixed(2)} × {billFormData.water_rate} = {formatCurrency(Math.max(0, parseFloat(billFormData.water_current_reading) - parseFloat(billFormData.water_prev_reading)) * parseFloat(billFormData.water_rate || '50'))}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -1921,37 +1987,48 @@ export default function Billing() {
                     <input
                       type="number"
                       step="0.01"
+                      min="0"
                       value={billFormData.water_rate}
                       onChange={(e) => setBillFormData({ ...billFormData, water_rate: e.target.value })}
                       className="input"
-                      required
+                      placeholder="50"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Electricity Previous Reading
+                      Electricity Previous Reading <span className="text-xs text-slate-500 font-normal">(Auto-filled)</span>
                     </label>
                     <input
                       type="number"
                       step="0.01"
                       value={billFormData.elec_prev_reading}
                       onChange={(e) => setBillFormData({ ...billFormData, elec_prev_reading: e.target.value })}
-                      className="input"
-                      required
+                      className="input bg-slate-50 dark:bg-zinc-900"
+                      readOnly
+                      title="Automatically filled from the most recent bill for this unit"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Electricity Current Reading
+                      Electricity Current Reading <span className="text-xs text-green-600 font-normal">(Enter current)</span>
                     </label>
                     <input
                       type="number"
                       step="0.01"
                       value={billFormData.elec_current_reading}
-                      onChange={(e) => setBillFormData({ ...billFormData, elec_current_reading: e.target.value })}
+                      onChange={(e) => {
+                        const currentReading = e.target.value
+                        setBillFormData({ ...billFormData, elec_current_reading: currentReading })
+                      }}
                       className="input"
                       required
+                      placeholder="Enter current reading"
                     />
+                    {billFormData.elec_current_reading && billFormData.elec_prev_reading && (
+                      <p className="text-xs text-slate-500 mt-1">
+                        Units: {Math.max(0, parseFloat(billFormData.elec_current_reading) - parseFloat(billFormData.elec_prev_reading)).toFixed(2)} × {billFormData.elec_rate} = {formatCurrency(Math.max(0, parseFloat(billFormData.elec_current_reading) - parseFloat(billFormData.elec_prev_reading)) * parseFloat(billFormData.elec_rate || '15'))}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -1960,10 +2037,11 @@ export default function Billing() {
                     <input
                       type="number"
                       step="0.01"
+                      min="0"
                       value={billFormData.elec_rate}
                       onChange={(e) => setBillFormData({ ...billFormData, elec_rate: e.target.value })}
                       className="input"
-                      required
+                      placeholder="15"
                     />
                   </div>
                   <div>

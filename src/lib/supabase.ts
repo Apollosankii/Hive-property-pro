@@ -5,6 +5,15 @@ const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
+/**
+ * Get the current authenticated user's ID
+ * Returns null if no user is authenticated
+ */
+export async function getCurrentUserId(): Promise<string | null> {
+  const { data: { session } } = await supabase.auth.getSession()
+  return session?.user?.id || null
+}
+
 // Database Types
 export interface Tenant {
   id: string

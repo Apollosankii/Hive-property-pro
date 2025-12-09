@@ -86,49 +86,77 @@ export function exportBillsToExcel(bills: any[], filename: string = 'bills-expor
   const workbook = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Bills')
   
-  // Define column widths for better readability
+  // Define column widths optimized to fit on one page laterally
+  // Landscape A4: ~11.7" width, with margins ~10.7" usable = ~75-80 character units max
+  // Total target: ~75 character units to ensure fit with scaling
   const columnWidths = [
-    { wch: 12 }, // Invoice #
-    { wch: 18 }, // Billing Month
-    { wch: 12 }, // Unit Number
-    { wch: 20 }, // Building Name
-    { wch: 20 }, // Tenant Name
-    { wch: 15 }, // Tenant Phone
+    { wch: 8 },  // Invoice # (reduced from 10)
+    { wch: 12 }, // Billing Month (reduced from 15)
+    { wch: 8 },  // Unit Number (reduced from 10)
+    { wch: 14 }, // Building Name (reduced from 18)
+    { wch: 14 }, // Tenant Name (reduced from 18)
+    { wch: 11 }, // Tenant Phone (reduced from 13)
     
-    // Water columns
-    { wch: 22 }, // Water Previous Reading
-    { wch: 22 }, // Water Current Reading
-    { wch: 20 }, // Water Units Consumed
-    { wch: 18 }, // Water Rate
-    { wch: 14 }, // Water Amount
+    // Water columns (reduced widths)
+    { wch: 14 }, // Water Previous Reading (reduced from 18)
+    { wch: 14 }, // Water Current Reading (reduced from 18)
+    { wch: 12 }, // Water Units Consumed (reduced from 16)
+    { wch: 11 }, // Water Rate (reduced from 14)
+    { wch: 10 }, // Water Amount (reduced from 12)
     
-    // Electricity columns
-    { wch: 28 }, // Electricity Previous Reading
-    { wch: 28 }, // Electricity Current Reading
-    { wch: 26 }, // Electricity Units Consumed
-    { wch: 24 }, // Electricity Rate
-    { wch: 20 }, // Electricity Amount
+    // Electricity columns (reduced widths)
+    { wch: 15 }, // Electricity Previous Reading (reduced from 20)
+    { wch: 15 }, // Electricity Current Reading (reduced from 20)
+    { wch: 13 }, // Electricity Units Consumed (reduced from 18)
+    { wch: 12 }, // Electricity Rate (reduced from 16)
+    { wch: 11 }, // Electricity Amount (reduced from 14)
     
-    // Rent and Utilities
-    { wch: 14 }, // Monthly Rent
-    { wch: 16 }, // Garbage Amount
-    { wch: 18 }, // Maintenance Amount
-    { wch: 22 }, // Other Utilities Amount
-    { wch: 16 }, // Total Utilities
+    // Rent and Utilities (reduced widths)
+    { wch: 10 }, // Monthly Rent (reduced from 12)
+    { wch: 10 }, // Garbage Amount (reduced from 13)
+    { wch: 11 }, // Maintenance Amount (reduced from 15)
+    { wch: 14 }, // Other Utilities Amount (reduced from 18)
+    { wch: 10 }, // Total Utilities (reduced from 13)
     
-    // Financial Summary
-    { wch: 22 }, // Arrears Brought Forward
-    { wch: 14 }, // Total Amount
-    { wch: 14 }, // Amount Paid
-    { wch: 14 }, // Balance
-    { wch: 12 }, // Status
+    // Financial Summary (reduced widths)
+    { wch: 14 }, // Arrears Brought Forward (reduced from 18)
+    { wch: 10 }, // Total Amount (reduced from 12)
+    { wch: 10 }, // Amount Paid (reduced from 12)
+    { wch: 10 }, // Balance (reduced from 12)
+    { wch: 8 },  // Status (reduced from 10)
     
-    // Dates
-    { wch: 14 }, // Created Date
-    { wch: 14 }, // Updated Date
+    // Dates (reduced widths)
+    { wch: 10 }, // Created Date (reduced from 12)
+    { wch: 10 }, // Updated Date (reduced from 12)
   ]
   
+  // Calculate total width
+  const totalWidth = columnWidths.reduce((sum, col) => sum + col.wch, 0)
+  console.log(`Total column width: ${totalWidth} character units`)
+  
   worksheet['!cols'] = columnWidths
+  
+  // Configure page setup to fit on one page laterally (horizontally)
+  // Using narrow margins and landscape orientation
+  worksheet['!margins'] = {
+    left: 0.25,   // Narrow margin
+    right: 0.25,  // Narrow margin
+    top: 0.75,
+    bottom: 0.75,
+    header: 0.3,
+    footer: 0.3,
+  }
+  
+  // Page setup for landscape A4 - fit to 1 page wide
+  worksheet['!pageSetup'] = {
+    fitToWidth: 1,        // Fit to 1 page wide (most important)
+    fitToHeight: 0,       // No height limit (use as many pages as needed)
+    orientation: 'landscape', // Landscape orientation
+    paperSize: 9,         // A4 paper size
+    scale: 100,           // Start with 100% scale, Excel will auto-adjust if needed
+    horizontalDpi: 200,
+    verticalDpi: 200,
+  }
   
   // Add summary sheet
   const summaryData = [
@@ -146,6 +174,24 @@ export function exportBillsToExcel(bills: any[], filename: string = 'bills-expor
   
   // Set summary column widths
   summarySheet['!cols'] = [{ wch: 20 }, { wch: 15 }]
+  
+  // Configure summary page setup
+  summarySheet['!margins'] = {
+    left: 0.5,
+    right: 0.5,
+    top: 0.75,
+    bottom: 0.75,
+    header: 0.5,
+    footer: 0.5,
+  }
+  
+  summarySheet['!pageSetup'] = {
+    fitToWidth: 1,
+    fitToHeight: 1,
+    orientation: 'portrait',
+    paperSize: 9,
+    scale: 100,
+  }
   
   XLSX.writeFile(workbook, `${filename}-${new Date().toISOString().split('T')[0]}.xlsx`)
 }

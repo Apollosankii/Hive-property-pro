@@ -276,11 +276,20 @@ async function createOrUpdateTenant(
   if (!name || !phone) return null
 
   try {
-    // Check if tenant exists by phone
+    // Get current user ID
+    const { data: { session } } = await supabase.auth.getSession()
+    const userId = session?.user?.id
+    if (!userId) {
+      console.error('User not authenticated')
+      return null
+    }
+
+    // Check if tenant exists by phone (only for current user)
     const { data: existingTenant } = await supabase
       .from('tenants')
       .select('id')
       .eq('phone', phone)
+      .eq('user_id', userId)
       .single()
 
     if (existingTenant) {
@@ -302,7 +311,7 @@ async function createOrUpdateTenant(
 
       return existingTenant.id
     } else {
-      // Create new tenant
+      // Create new tenant with user_id
       const { data: newTenant, error: createError } = await supabase
         .from('tenants')
         .insert([{
@@ -310,6 +319,7 @@ async function createOrUpdateTenant(
           phone: phone,
           unit_id: unitId,
           status: 'active',
+          user_id: userId,
         }])
         .select()
         .single()
@@ -358,6 +368,13 @@ async function importBillsFromPDF(
   onProgress?: (progress: number, message: string) => void
 ): Promise<{ success: number; errors: string[] }> {
   try {
+    // Get current user ID
+    const { data: { session } } = await supabase.auth.getSession()
+    const userId = session?.user?.id
+    if (!userId) {
+      throw new Error('User not authenticated')
+    }
+
     if (onProgress) onProgress(0, 'Parsing PDF file...')
     
     const parsedRows = await parsePDFFile(file)
@@ -472,6 +489,7 @@ async function importBillsFromPDF(
           garbage_amount: garbageAmount,
           arrears_brought_forward: arrearsBroughtForward,
           amount_paid: amountPaid,
+          user_id: userId,
         }
 
         if (existingBill) {
@@ -512,6 +530,13 @@ export async function importBillsFromExcel(
   onProgress?: (progress: number, message: string) => void
 ): Promise<{ success: number; errors: string[] }> {
   try {
+    // Get current user ID
+    const { data: { session } } = await supabase.auth.getSession()
+    const userId = session?.user?.id
+    if (!userId) {
+      throw new Error('User not authenticated')
+    }
+
     const workbook = await parseExcelFile(file)
     const sheetName = workbook.SheetNames[0]
     const worksheet = workbook.Sheets[sheetName]
@@ -700,6 +725,7 @@ export async function importBillsFromExcel(
           garbage_amount: garbageAmount,
           arrears_brought_forward: arrearsBroughtForward,
           amount_paid: amountPaid,
+          user_id: userId,
         }
 
         if (existingBill) {
