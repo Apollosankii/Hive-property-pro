@@ -3,6 +3,9 @@ import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/utils'
 import { Users, DollarSign, AlertCircle, Home, TrendingUp, ArrowRight, Calendar, Briefcase, Wallet, Package } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { RevenueChart } from '@/components/charts/RevenueChart'
+import { OccupancyChart } from '@/components/charts/OccupancyChart'
+import { FinancialOverviewChart } from '@/components/charts/FinancialOverviewChart'
 
 export default function Dashboard() {
   const { data: stats } = useQuery({
@@ -75,6 +78,85 @@ export default function Dashboard() {
       
       if (error) throw error
       return data
+    },
+    staleTime: 0,
+    refetchOnMount: true,
+  })
+
+  // Query for monthly financial data (last 6 months)
+  const { data: monthlyFinancialData } = useQuery({
+    queryKey: ['monthly-financial-data'],
+    queryFn: async () => {
+      const now = new Date()
+      const sixMonthsAgo = new Date()
+      sixMonthsAgo.setMonth(now.getMonth() - 6)
+      
+      const startDate = sixMonthsAgo.toISOString().split('T')[0]
+      const endDate = now.toISOString().split('T')[0]
+
+      const [paymentsRes, expensesRes, salariesRes] = await Promise.all([
+        supabase
+          .from('payments')
+          .select('payment_date, amount')
+          .gte('payment_date', startDate)
+          .lte('payment_date', endDate),
+        supabase
+          .from('expenses')
+          .select('expense_date, amount')
+          .gte('expense_date', startDate)
+          .lte('expense_date', endDate),
+        supabase
+          .from('salaries')
+          .select('salary_month, amount_paid')
+          .gte('salary_month', startDate)
+          .lte('salary_month', endDate),
+      ])
+
+      // Group by month
+      const monthlyData: Record<string, { revenue: number; expenses: number; salaries: number }> = {}
+      
+      // Initialize last 6 months
+      for (let i = 5; i >= 0; i--) {
+        const date = new Date()
+        date.setMonth(date.getMonth() - i)
+        const monthKey = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+        monthlyData[monthKey] = { revenue: 0, expenses: 0, salaries: 0 }
+      }
+
+      // Aggregate payments
+      paymentsRes.data?.forEach((payment: any) => {
+        const date = new Date(payment.payment_date)
+        const monthKey = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+        if (monthlyData[monthKey]) {
+          monthlyData[monthKey].revenue += payment.amount || 0
+        }
+      })
+
+      // Aggregate expenses
+      expensesRes.data?.forEach((expense: any) => {
+        const date = new Date(expense.expense_date)
+        const monthKey = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+        if (monthlyData[monthKey]) {
+          monthlyData[monthKey].expenses += expense.amount || 0
+        }
+      })
+
+      // Aggregate salaries
+      salariesRes.data?.forEach((salary: any) => {
+        const date = new Date(salary.salary_month)
+        const monthKey = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+        if (monthlyData[monthKey]) {
+          monthlyData[monthKey].salaries += salary.amount_paid || 0
+        }
+      })
+
+      // Convert to array format
+      return Object.entries(monthlyData).map(([month, data]) => ({
+        month,
+        revenue: data.revenue,
+        expenses: data.expenses + data.salaries,
+        profit: data.revenue - data.expenses - data.salaries,
+      }))
     },
     staleTime: 0,
     refetchOnMount: true,
@@ -233,6 +315,57 @@ export default function Dashboard() {
             </div>
           </div>
         </Link>
+      </div>
+
+      {/* Charts Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Revenue Trends Chart */}
+        <div className="card">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-2.5 bg-emerald-100 dark:bg-emerald-900/30 rounded-xl">
+              <TrendingUp className="text-emerald-600 dark:text-emerald-400" size={20} />
+            </div>
+            <h3 className="font-semibold text-lg text-slate-900 dark:text-zinc-50">Revenue Trends (Last 6 Months)</h3>
+          </div>
+          {monthlyFinancialData && monthlyFinancialData.length > 0 ? (
+            <RevenueChart data={monthlyFinancialData} />
+          ) : (
+            <div className="h-[300px] flex items-center justify-center text-slate-500 dark:text-zinc-400">
+              No data available
+            </div>
+          )}
+        </div>
+
+        {/* Occupancy Chart */}
+        <div className="card">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-2.5 bg-blue-100 dark:bg-blue-900/30 rounded-xl">
+              <Home className="text-blue-600 dark:text-blue-400" size={20} />
+            </div>
+            <h3 className="font-semibold text-lg text-slate-900 dark:text-zinc-50">Occupancy Rate</h3>
+          </div>
+          <OccupancyChart 
+            occupied={stats?.occupiedUnits || 0} 
+            vacant={stats?.vacantUnits || 0} 
+          />
+        </div>
+      </div>
+
+      {/* Financial Overview Chart */}
+      <div className="card">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="p-2.5 bg-purple-100 dark:bg-purple-900/30 rounded-xl">
+            <DollarSign className="text-purple-600 dark:text-purple-400" size={20} />
+          </div>
+          <h3 className="font-semibold text-lg text-slate-900 dark:text-zinc-50">Financial Overview (Last 6 Months)</h3>
+        </div>
+        {monthlyFinancialData && monthlyFinancialData.length > 0 ? (
+          <FinancialOverviewChart data={monthlyFinancialData} />
+        ) : (
+          <div className="h-[300px] flex items-center justify-center text-slate-500 dark:text-zinc-400">
+            No data available
+          </div>
+        )}
       </div>
 
       {/* Additional Info */}

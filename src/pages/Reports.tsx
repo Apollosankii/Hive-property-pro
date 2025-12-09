@@ -4,6 +4,11 @@ import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { FileSpreadsheet } from 'lucide-react'
 import { exportToExcel } from '@/lib/excel'
+import { RevenueChart } from '@/components/charts/RevenueChart'
+import { OccupancyChart } from '@/components/charts/OccupancyChart'
+import { ExpenseBreakdownChart } from '@/components/charts/ExpenseBreakdownChart'
+import { ArrearsAgingChart } from '@/components/charts/ArrearsAgingChart'
+import { FinancialOverviewChart } from '@/components/charts/FinancialOverviewChart'
 
 export default function Reports() {
   // Set default date range to last 10 years to show all refunds by default
@@ -757,6 +762,27 @@ export default function Reports() {
               </p>
             </div>
 
+            {/* Revenue Chart */}
+            {revenueData && revenueData.payments && revenueData.payments.length > 0 && (
+              <div className="card mb-6">
+                <h3 className="font-semibold text-lg text-slate-900 dark:text-zinc-50 mb-4">Revenue Trends</h3>
+                <RevenueChart 
+                  data={(() => {
+                    // Group payments by month
+                    const monthlyData: Record<string, number> = {}
+                    revenueData.payments.forEach((payment: any) => {
+                      const date = new Date(payment.payment_date)
+                      const monthKey = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+                      monthlyData[monthKey] = (monthlyData[monthKey] || 0) + (payment.amount || 0)
+                    })
+                    return Object.entries(monthlyData)
+                      .sort((a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime())
+                      .map(([month, revenue]) => ({ month, revenue }))
+                  })()}
+                />
+              </div>
+            )}
+
             <div className="overflow-x-auto">
               <table className="table">
                 <thead>
@@ -812,32 +838,63 @@ export default function Reports() {
             </div>
 
             {arrearsData && (
-              <div className="grid grid-cols-4 gap-4 mb-6">
-                <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                  <p className="text-sm text-gray-600 dark:text-blue-300">Current</p>
-                  <p className="text-xl font-bold text-slate-900 dark:text-blue-100">
-                    {arrearsData.aging.current.length}
-                  </p>
+              <>
+                <div className="grid grid-cols-4 gap-4 mb-6">
+                  <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                    <p className="text-sm text-gray-600 dark:text-blue-300">Current</p>
+                    <p className="text-xl font-bold text-slate-900 dark:text-blue-100">
+                      {arrearsData.aging.current.length}
+                    </p>
+                  </div>
+                  <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                    <p className="text-sm text-gray-600 dark:text-yellow-300">1-30 Days</p>
+                    <p className="text-xl font-bold text-slate-900 dark:text-yellow-100">
+                      {arrearsData.aging['30days'].length}
+                    </p>
+                  </div>
+                  <div className="p-4 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg">
+                    <p className="text-sm text-gray-600 dark:text-orange-300">31-60 Days</p>
+                    <p className="text-xl font-bold text-slate-900 dark:text-orange-100">
+                      {arrearsData.aging['60days'].length}
+                    </p>
+                  </div>
+                  <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <p className="text-sm text-gray-600 dark:text-red-300">60+ Days</p>
+                    <p className="text-xl font-bold text-slate-900 dark:text-red-100">
+                      {arrearsData.aging['90days'].length}
+                    </p>
+                  </div>
                 </div>
-                <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-                  <p className="text-sm text-gray-600 dark:text-yellow-300">1-30 Days</p>
-                  <p className="text-xl font-bold text-slate-900 dark:text-yellow-100">
-                    {arrearsData.aging['30days'].length}
-                  </p>
+
+                {/* Arrears Aging Chart */}
+                <div className="card mb-6">
+                  <h3 className="font-semibold text-lg text-slate-900 dark:text-zinc-50 mb-4">Arrears Aging Analysis</h3>
+                  <ArrearsAgingChart 
+                    data={[
+                      {
+                        period: 'Current',
+                        count: arrearsData.aging.current.length,
+                        amount: arrearsData.aging.current.reduce((sum: number, b: any) => sum + (b.balance || 0), 0)
+                      },
+                      {
+                        period: '1-30 Days',
+                        count: arrearsData.aging['30days'].length,
+                        amount: arrearsData.aging['30days'].reduce((sum: number, b: any) => sum + (b.balance || 0), 0)
+                      },
+                      {
+                        period: '31-60 Days',
+                        count: arrearsData.aging['60days'].length,
+                        amount: arrearsData.aging['60days'].reduce((sum: number, b: any) => sum + (b.balance || 0), 0)
+                      },
+                      {
+                        period: '60+ Days',
+                        count: arrearsData.aging['90days'].length,
+                        amount: arrearsData.aging['90days'].reduce((sum: number, b: any) => sum + (b.balance || 0), 0)
+                      }
+                    ]}
+                  />
                 </div>
-                <div className="p-4 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg">
-                  <p className="text-sm text-gray-600 dark:text-orange-300">31-60 Days</p>
-                  <p className="text-xl font-bold text-slate-900 dark:text-orange-100">
-                    {arrearsData.aging['60days'].length}
-                  </p>
-                </div>
-                <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                  <p className="text-sm text-gray-600 dark:text-red-300">60+ Days</p>
-                  <p className="text-xl font-bold text-slate-900 dark:text-red-100">
-                    {arrearsData.aging['90days'].length}
-                  </p>
-                </div>
-              </div>
+              </>
             )}
 
             <div className="overflow-x-auto">
@@ -901,6 +958,15 @@ export default function Reports() {
                     <p className="text-sm text-gray-600 dark:text-zinc-300">Occupancy Rate</p>
                     <p className="text-xl font-bold text-slate-900 dark:text-zinc-100">{occupancyData.occupancyRate}%</p>
                   </div>
+                </div>
+
+                {/* Occupancy Chart */}
+                <div className="card mb-6">
+                  <h3 className="font-semibold text-lg text-slate-900 dark:text-zinc-50 mb-4">Occupancy Visualization</h3>
+                  <OccupancyChart 
+                    occupied={occupancyData.occupied}
+                    vacant={occupancyData.vacant}
+                  />
                 </div>
 
             <div className="overflow-x-auto">
@@ -1020,6 +1086,26 @@ export default function Reports() {
               <p className="text-sm text-red-800 dark:text-red-300 mb-1">Total Expenses</p>
               <p className="text-xl font-bold text-red-900 dark:text-red-200">{formatCurrency(expensesData?.total || 0)}</p>
             </div>
+
+            {/* Expense Breakdown Chart */}
+            {expensesData && expensesData.expenses && expensesData.expenses.length > 0 && (
+              <div className="card mb-6">
+                <h3 className="font-semibold text-lg text-slate-900 dark:text-zinc-50 mb-4">Expense Breakdown by Category</h3>
+                <ExpenseBreakdownChart 
+                  data={(() => {
+                    const categoryData: Record<string, number> = {}
+                    expensesData.expenses.forEach((expense: any) => {
+                      const category = expense.category || 'Uncategorized'
+                      categoryData[category] = (categoryData[category] || 0) + (expense.amount || 0)
+                    })
+                    return Object.entries(categoryData)
+                      .map(([category, amount]) => ({ category, amount }))
+                      .sort((a, b) => b.amount - a.amount)
+                  })()}
+                />
+              </div>
+            )}
+
             <div className="overflow-x-auto">
               <table className="table">
                 <thead>
@@ -1142,6 +1228,39 @@ export default function Reports() {
                 </p>
               </div>
             </div>
+
+            {/* Financial Overview Chart */}
+            {financialData && (
+              <div className="card mb-6">
+                <h3 className="font-semibold text-lg text-slate-900 dark:text-zinc-50 mb-4">Financial Overview</h3>
+                <FinancialOverviewChart 
+                  data={(() => {
+                    // Group by month for the selected date range
+                    const monthlyData: Record<string, { revenue: number; expenses: number; salaries: number; refunds: number }> = {}
+                    
+                    // This is a simplified version - in a real scenario, you'd fetch monthly data
+                    // For now, we'll show a single period summary
+                    const start = new Date(startDate)
+                    const end = new Date(endDate)
+                    const monthKey = `${start.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })} - ${end.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`
+                    
+                    monthlyData[monthKey] = {
+                      revenue: financialData.revenue || 0,
+                      expenses: financialData.expenses || 0,
+                      salaries: financialData.salaries || 0,
+                      refunds: financialData.refunds || 0
+                    }
+                    
+                    return Object.entries(monthlyData).map(([month, data]) => ({
+                      month,
+                      revenue: data.revenue,
+                      expenses: data.expenses + data.salaries + data.refunds,
+                      profit: data.revenue - data.expenses - data.salaries - data.refunds
+                    }))
+                  })()}
+                />
+              </div>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="p-6 bg-slate-50 dark:bg-zinc-900 rounded-xl">
                 <h3 className="font-semibold text-slate-900 dark:text-zinc-50 mb-4">Period Summary</h3>
