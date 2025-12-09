@@ -24,13 +24,17 @@ export default function Billing() {
     elec_prev: number
     elec_current: number
   }>>({})
+  const [bulkRates, setBulkRates] = useState({
+    water_rate: '',
+    elec_rate: ''
+  })
   const [billFormData, setBillFormData] = useState({
     water_prev_reading: '',
     water_current_reading: '',
-    water_rate: '50',
+    water_rate: '',
     elec_prev_reading: '',
     elec_current_reading: '',
-    elec_rate: '15',
+    elec_rate: '',
     rent_amount: '',
     arrears_brought_forward: '',
     garbage_amount: '',
@@ -47,6 +51,18 @@ export default function Billing() {
   const [importMessage, setImportMessage] = useState('')
   const [importResult, setImportResult] = useState<{ success: number; errors: string[] } | null>(null)
   const queryClient = useQueryClient()
+
+  // Get settings for default rates
+  const { data: settings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: async () => {
+      const stored = localStorage.getItem('app-settings')
+      if (stored) {
+        return JSON.parse(stored)
+      }
+      return { water_rate: 50, elec_rate: 15 }
+    },
+  })
 
   const { data: bills, error: billsError, isLoading: billsLoading } = useQuery({
     queryKey: ['bills', selectedMonth],
@@ -301,9 +317,21 @@ export default function Billing() {
         ]) || []
       )
 
-      // Default rates (can be moved to settings)
-      const defaultWaterRate = 50
-      const defaultElecRate = 15
+      // Get rates from bulk rates state or settings, fallback to defaults
+      // Fetch settings directly within the mutation to ensure we have the latest values
+      const storedSettings = localStorage.getItem('app-settings')
+      const parsedSettings = storedSettings ? JSON.parse(storedSettings) : null
+      
+      // Use rates from bulkRates if provided, otherwise use settings, otherwise use defaults
+      const defaultWaterRate = bulkRates.water_rate ? parseFloat(bulkRates.water_rate) : (parsedSettings?.water_rate || 50)
+      const defaultElecRate = bulkRates.elec_rate ? parseFloat(bulkRates.elec_rate) : (parsedSettings?.elec_rate || 15)
+      
+      console.log('Bill generation rates:', {
+        bulkRates,
+        parsedSettings,
+        defaultWaterRate,
+        defaultElecRate
+      })
 
       // Calculate utility amounts from active utility types ONLY
       // For fixed-rate utilities, the rate IS the amount (no units calculation needed)
@@ -460,10 +488,10 @@ export default function Billing() {
       setBillFormData({
         water_prev_reading: '',
         water_current_reading: '',
-        water_rate: '50',
+        water_rate: '',
         elec_prev_reading: '',
         elec_current_reading: '',
-        elec_rate: '15',
+        elec_rate: '',
         rent_amount: '',
         arrears_brought_forward: '',
         garbage_amount: '',
@@ -499,10 +527,10 @@ export default function Billing() {
       setBillFormData({
         water_prev_reading: '',
         water_current_reading: '',
-        water_rate: '50',
+        water_rate: '',
         elec_prev_reading: '',
         elec_current_reading: '',
-        elec_rate: '15',
+        elec_rate: '',
         rent_amount: '',
         arrears_brought_forward: '',
         garbage_amount: '0',
@@ -538,10 +566,10 @@ export default function Billing() {
       setBillFormData({
         water_prev_reading: '',
         water_current_reading: '',
-        water_rate: '50',
+        water_rate: '',
         elec_prev_reading: '',
         elec_current_reading: '',
-        elec_rate: '15',
+        elec_rate: '',
         rent_amount: '',
         arrears_brought_forward: '',
         garbage_amount: '',
@@ -592,10 +620,10 @@ export default function Billing() {
     setBillFormData({
       water_prev_reading: bill.water_prev_reading?.toString() || '',
       water_current_reading: bill.water_current_reading?.toString() || '',
-      water_rate: bill.water_rate?.toString() || '50',
+      water_rate: bill.water_rate?.toString() || '',
       elec_prev_reading: bill.elec_prev_reading?.toString() || '',
       elec_current_reading: bill.elec_current_reading?.toString() || '',
-      elec_rate: bill.elec_rate?.toString() || '15',
+      elec_rate: bill.elec_rate?.toString() || '',
       rent_amount: bill.rent_amount?.toString() || '',
       arrears_brought_forward: bill.arrears_brought_forward?.toString() || '',
       garbage_amount: bill.garbage_amount?.toString() || '0',
@@ -640,13 +668,17 @@ export default function Billing() {
     
     console.log('💰 handleCreateBill - Final amounts:', { garbageAmount, maintenanceAmount, otherUtilitiesAmount })
     
+    // Get settings to initialize rate fields
+    const storedSettings = localStorage.getItem('app-settings')
+    const parsedSettings = storedSettings ? JSON.parse(storedSettings) : null
+    
     setBillFormData({
       water_prev_reading: '',
       water_current_reading: '',
-      water_rate: '50',
+      water_rate: parsedSettings?.water_rate?.toString() || '',
       elec_prev_reading: '',
       elec_current_reading: '',
-      elec_rate: '15',
+      elec_rate: parsedSettings?.elec_rate?.toString() || '',
       rent_amount: '',
       arrears_brought_forward: '',
       garbage_amount: garbageAmount,
@@ -668,8 +700,13 @@ export default function Billing() {
     // We'll calculate total from the form data
     const waterUnits = Math.max(0, (parseFloat(billFormData.water_current_reading) || 0) - (parseFloat(billFormData.water_prev_reading) || 0))
     const elecUnits = Math.max(0, (parseFloat(billFormData.elec_current_reading) || 0) - (parseFloat(billFormData.elec_prev_reading) || 0))
-    const waterAmount = waterUnits * (parseFloat(billFormData.water_rate) || 50)
-    const elecAmount = elecUnits * (parseFloat(billFormData.elec_rate) || 15)
+    // Fetch settings directly to ensure we have the latest values
+    const storedSettings = localStorage.getItem('app-settings')
+    const parsedSettings = storedSettings ? JSON.parse(storedSettings) : null
+    const waterRate = parseFloat(billFormData.water_rate) || parsedSettings?.water_rate || 50
+    const elecRate = parseFloat(billFormData.elec_rate) || parsedSettings?.elec_rate || 15
+    const waterAmount = waterUnits * waterRate
+    const elecAmount = elecUnits * elecRate
     const rentAmount = parseFloat(billFormData.rent_amount) || 0
     const arrears = parseFloat(billFormData.arrears_brought_forward) || 0
     const garbageAmount = parseFloat(billFormData.garbage_amount) || 0
@@ -682,10 +719,10 @@ export default function Billing() {
     const updates = {
       water_prev_reading: parseFloat(billFormData.water_prev_reading) || 0,
       water_current_reading: parseFloat(billFormData.water_current_reading) || 0,
-      water_rate: parseFloat(billFormData.water_rate) || 50,
+      water_rate: parseFloat(billFormData.water_rate) || parsedSettings?.water_rate || 50,
       elec_prev_reading: parseFloat(billFormData.elec_prev_reading) || 0,
       elec_current_reading: parseFloat(billFormData.elec_current_reading) || 0,
-      elec_rate: parseFloat(billFormData.elec_rate) || 15,
+      elec_rate: parseFloat(billFormData.elec_rate) || parsedSettings?.elec_rate || 15,
       rent_amount: parseFloat(billFormData.rent_amount) || 0,
       arrears_brought_forward: parseFloat(billFormData.arrears_brought_forward) || 0,
       garbage_amount: garbageAmount,
@@ -738,16 +775,20 @@ export default function Billing() {
       }
     }
 
+    // Fetch settings directly to ensure we have the latest values
+    const storedSettings = localStorage.getItem('app-settings')
+    const parsedSettings = storedSettings ? JSON.parse(storedSettings) : null
+    
     const billData = {
       unit_id: selectedUnitForBill,
       tenant_id: selectedUnit.tenants?.id || null,
       billing_month: selectedMonth + '-01',
       water_prev_reading: parseFloat(billFormData.water_prev_reading) || 0,
       water_current_reading: parseFloat(billFormData.water_current_reading) || 0,
-      water_rate: parseFloat(billFormData.water_rate) || 50,
+      water_rate: parseFloat(billFormData.water_rate) || parsedSettings?.water_rate || 50,
       elec_prev_reading: parseFloat(billFormData.elec_prev_reading) || 0,
       elec_current_reading: parseFloat(billFormData.elec_current_reading) || 0,
-      elec_rate: parseFloat(billFormData.elec_rate) || 15,
+      elec_rate: parseFloat(billFormData.elec_rate) || parsedSettings?.elec_rate || 15,
       rent_amount: parseFloat(billFormData.rent_amount) || selectedUnit.monthly_rent || 0,
       arrears_brought_forward: parseFloat(billFormData.arrears_brought_forward) || 0,
       garbage_amount: garbageAmount,
@@ -799,10 +840,10 @@ export default function Billing() {
     setBillFormData({
       water_prev_reading: '',
       water_current_reading: '',
-      water_rate: '50',
+      water_rate: '',
       elec_prev_reading: '',
       elec_current_reading: '',
-      elec_rate: '15',
+      elec_rate: '',
       rent_amount: '',
       arrears_brought_forward: '',
       garbage_amount: '0',
@@ -1266,6 +1307,40 @@ export default function Billing() {
               <p className="text-slate-600 mb-6">
                 Enter current meter readings for all units. Previous readings will be auto-filled where available.
               </p>
+              
+              {/* Rate inputs for bulk generation */}
+              <div className="grid grid-cols-2 gap-4 mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
+                    Water Rate (KES/unit)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={bulkRates.water_rate}
+                    onChange={(e) => setBulkRates({ ...bulkRates, water_rate: e.target.value })}
+                    className="input"
+                    placeholder={settings?.water_rate?.toString() || "50"}
+                  />
+                  <p className="text-xs text-slate-500 mt-1">Applied to all units when generating bills</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
+                    Electricity Rate (KES/unit)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={bulkRates.elec_rate}
+                    onChange={(e) => setBulkRates({ ...bulkRates, elec_rate: e.target.value })}
+                    className="input"
+                    placeholder={settings?.elec_rate?.toString() || "15"}
+                  />
+                  <p className="text-xs text-slate-500 mt-1">Applied to all units when generating bills</p>
+                </div>
+              </div>
             
               <div className="space-y-4 mb-6 max-h-[60vh] overflow-y-auto pr-2">
                 {occupiedUnits?.map((unit: any) => {
@@ -1364,6 +1439,7 @@ export default function Billing() {
                   onClick={() => {
                     setShowMeterModal(false)
                     setMeterReadings({})
+                    setBulkRates({ water_rate: '', elec_rate: '' })
                   }}
                   className="flex-1 btn btn-secondary"
                 >
@@ -1455,7 +1531,7 @@ export default function Billing() {
                     />
                     {billFormData.water_current_reading && billFormData.water_prev_reading && (
                       <p className="text-xs text-slate-500 mt-1">
-                        Units: {Math.max(0, parseFloat(billFormData.water_current_reading) - parseFloat(billFormData.water_prev_reading)).toFixed(2)} × {billFormData.water_rate} = {formatCurrency(Math.max(0, parseFloat(billFormData.water_current_reading) - parseFloat(billFormData.water_prev_reading)) * parseFloat(billFormData.water_rate || '50'))}
+                        Units: {Math.max(0, parseFloat(billFormData.water_current_reading) - parseFloat(billFormData.water_prev_reading)).toFixed(2)} × {billFormData.water_rate || settings?.water_rate || 50} = {formatCurrency(Math.max(0, parseFloat(billFormData.water_current_reading) - parseFloat(billFormData.water_prev_reading)) * parseFloat(billFormData.water_rate || settings?.water_rate || 50))}
                       </p>
                     )}
                   </div>
@@ -1470,7 +1546,7 @@ export default function Billing() {
                       value={billFormData.water_rate}
                       onChange={(e) => setBillFormData({ ...billFormData, water_rate: e.target.value })}
                       className="input"
-                      placeholder="50"
+                      placeholder={settings?.water_rate?.toString() || "50"}
                     />
                   </div>
                   <div>
@@ -1504,7 +1580,7 @@ export default function Billing() {
                     />
                     {billFormData.elec_current_reading && billFormData.elec_prev_reading && (
                       <p className="text-xs text-slate-500 mt-1">
-                        Units: {Math.max(0, parseFloat(billFormData.elec_current_reading) - parseFloat(billFormData.elec_prev_reading)).toFixed(2)} × {billFormData.elec_rate} = {formatCurrency(Math.max(0, parseFloat(billFormData.elec_current_reading) - parseFloat(billFormData.elec_prev_reading)) * parseFloat(billFormData.elec_rate || '15'))}
+                        Units: {Math.max(0, parseFloat(billFormData.elec_current_reading) - parseFloat(billFormData.elec_prev_reading)).toFixed(2)} × {billFormData.elec_rate || settings?.elec_rate || 15} = {formatCurrency(Math.max(0, parseFloat(billFormData.elec_current_reading) - parseFloat(billFormData.elec_prev_reading)) * parseFloat(billFormData.elec_rate || settings?.elec_rate || 15))}
                       </p>
                     )}
                   </div>
@@ -1519,7 +1595,7 @@ export default function Billing() {
                       value={billFormData.elec_rate}
                       onChange={(e) => setBillFormData({ ...billFormData, elec_rate: e.target.value })}
                       className="input"
-                      placeholder="15"
+                      placeholder={settings?.elec_rate?.toString() || "15"}
                     />
                   </div>
                   <div>
@@ -1976,7 +2052,7 @@ export default function Billing() {
                     />
                     {billFormData.water_current_reading && billFormData.water_prev_reading && (
                       <p className="text-xs text-slate-500 mt-1">
-                        Units: {Math.max(0, parseFloat(billFormData.water_current_reading) - parseFloat(billFormData.water_prev_reading)).toFixed(2)} × {billFormData.water_rate} = {formatCurrency(Math.max(0, parseFloat(billFormData.water_current_reading) - parseFloat(billFormData.water_prev_reading)) * parseFloat(billFormData.water_rate || '50'))}
+                        Units: {Math.max(0, parseFloat(billFormData.water_current_reading) - parseFloat(billFormData.water_prev_reading)).toFixed(2)} × {billFormData.water_rate || settings?.water_rate || 50} = {formatCurrency(Math.max(0, parseFloat(billFormData.water_current_reading) - parseFloat(billFormData.water_prev_reading)) * parseFloat(billFormData.water_rate || settings?.water_rate || 50))}
                       </p>
                     )}
                   </div>
@@ -1991,7 +2067,7 @@ export default function Billing() {
                       value={billFormData.water_rate}
                       onChange={(e) => setBillFormData({ ...billFormData, water_rate: e.target.value })}
                       className="input"
-                      placeholder="50"
+                      placeholder={settings?.water_rate?.toString() || "50"}
                     />
                   </div>
                   <div>
@@ -2026,7 +2102,7 @@ export default function Billing() {
                     />
                     {billFormData.elec_current_reading && billFormData.elec_prev_reading && (
                       <p className="text-xs text-slate-500 mt-1">
-                        Units: {Math.max(0, parseFloat(billFormData.elec_current_reading) - parseFloat(billFormData.elec_prev_reading)).toFixed(2)} × {billFormData.elec_rate} = {formatCurrency(Math.max(0, parseFloat(billFormData.elec_current_reading) - parseFloat(billFormData.elec_prev_reading)) * parseFloat(billFormData.elec_rate || '15'))}
+                        Units: {Math.max(0, parseFloat(billFormData.elec_current_reading) - parseFloat(billFormData.elec_prev_reading)).toFixed(2)} × {billFormData.elec_rate || settings?.elec_rate || 15} = {formatCurrency(Math.max(0, parseFloat(billFormData.elec_current_reading) - parseFloat(billFormData.elec_prev_reading)) * parseFloat(billFormData.elec_rate || settings?.elec_rate || 15))}
                       </p>
                     )}
                   </div>
@@ -2041,7 +2117,7 @@ export default function Billing() {
                       value={billFormData.elec_rate}
                       onChange={(e) => setBillFormData({ ...billFormData, elec_rate: e.target.value })}
                       className="input"
-                      placeholder="15"
+                      placeholder={settings?.elec_rate?.toString() || "15"}
                     />
                   </div>
                   <div>

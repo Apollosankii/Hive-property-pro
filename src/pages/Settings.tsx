@@ -51,12 +51,13 @@ export default function Settings() {
       localStorage.setItem('app-settings', JSON.stringify(newSettings))
       return newSettings
     },
-    onSuccess: () => {
-      queryClient.setQueryData(['settings'], (old: any) => ({
-        ...old,
-        water_rate: parseFloat(waterRate),
-        elec_rate: parseFloat(elecRate),
-      }))
+    onSuccess: (newSettings) => {
+      // Invalidate and refetch settings query to ensure all components get updated values
+      queryClient.invalidateQueries({ queryKey: ['settings'] })
+      queryClient.setQueryData(['settings'], newSettings)
+      // Reset local state to show saved values
+      setWaterRate('')
+      setElecRate('')
       alert('Settings saved successfully!')
     },
   })
@@ -168,9 +169,20 @@ export default function Settings() {
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault()
+    // Allow 0 or any positive number - save exactly what user enters
+    // If empty, keep existing value; if 0, save 0; if number, save that number
+    const newWaterRate = waterRate === '' 
+      ? (settings?.water_rate ?? 50) 
+      : (waterRate === '0' ? 0 : (parseFloat(waterRate) || settings?.water_rate || 50))
+    const newElecRate = elecRate === '' 
+      ? (settings?.elec_rate ?? 15) 
+      : (elecRate === '0' ? 0 : (parseFloat(elecRate) || settings?.elec_rate || 15))
+    
+    console.log('Saving rates:', { newWaterRate, newElecRate, waterRate, elecRate })
+    
     updateMutation.mutate({
-      water_rate: parseFloat(waterRate) || 50,
-      elec_rate: parseFloat(elecRate) || 15,
+      water_rate: newWaterRate,
+      elec_rate: newElecRate,
     })
   }
 
@@ -249,7 +261,8 @@ export default function Settings() {
             <input
               type="number"
               step="0.01"
-              value={waterRate || settings?.water_rate || ''}
+              min="0"
+              value={waterRate !== '' ? waterRate : (settings?.water_rate?.toString() || '')}
               onChange={(e) => setWaterRate(e.target.value)}
               className="input"
               placeholder="50"
@@ -266,7 +279,8 @@ export default function Settings() {
             <input
               type="number"
               step="0.01"
-              value={elecRate || settings?.elec_rate || ''}
+              min="0"
+              value={elecRate !== '' ? elecRate : (settings?.elec_rate?.toString() || '')}
               onChange={(e) => setElecRate(e.target.value)}
               className="input"
               placeholder="15"
