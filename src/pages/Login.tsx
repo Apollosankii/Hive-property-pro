@@ -115,12 +115,22 @@ export default function Login() {
             </button>
           </form>
 
-          <p className="mt-6 text-center text-sm text-slate-600 dark:text-zinc-400">
-            Don't have an account?{' '}
-            <Link to="/register" className="text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-semibold transition-colors">
-              Create one
-            </Link>
-          </p>
+          <div className="mt-6 space-y-3">
+            <p className="text-center text-sm text-slate-600 dark:text-zinc-400">
+              Don't have an account?{' '}
+              <Link to="/register" className="text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-semibold transition-colors">
+                Create one
+              </Link>
+            </p>
+            <div className="border-t border-slate-200 dark:border-zinc-700 pt-4">
+              <p className="text-center text-sm text-slate-600 dark:text-zinc-400">
+                Are you a caretaker?{' '}
+                <Link to="/caretaker/login" className="text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-semibold transition-colors">
+                  Sign in as Caretaker
+                </Link>
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     </div>

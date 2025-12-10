@@ -3,7 +3,15 @@ import { createClient } from '@supabase/supabase-js'
 const supabaseUrl = 'https://givbliycdppmfqeahxss.supabase.co'
 const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdpdmJsaXljZHBwbWZxZWFoeHNzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1NDk0OTcsImV4cCI6MjA4MDEyNTQ5N30.EKYadRZq_Evt3o-ZDvQTJMZWfLmm2fIAUjwu94Zn1AE'
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+  },
+})
+
+// Export supabaseUrl for use in Edge Function calls
+export { supabaseUrl }
 
 /**
  * Get the current authenticated user's ID
@@ -27,6 +35,8 @@ export interface Tenant {
   emergency_contact_relationship?: string
   status: 'active' | 'inactive'
   created_at: string
+  created_by_user_id?: string
+  modified_by_user_id?: string
 }
 
 export interface Building {
@@ -34,6 +44,8 @@ export interface Building {
   name: string
   location: string
   created_at: string
+  created_by_user_id?: string
+  modified_by_user_id?: string
 }
 
 export interface Unit {
@@ -55,6 +67,19 @@ export interface UtilityType {
   description?: string
   is_active: boolean
   display_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface Caretaker {
+  id: string
+  user_id: string
+  created_by: string
+  name: string
+  phone?: string
+  email: string
+  password_hash: string
+  status: 'active' | 'inactive'
   created_at: string
   updated_at: string
 }

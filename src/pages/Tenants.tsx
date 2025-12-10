@@ -114,10 +114,24 @@ export default function Tenants() {
       
       console.log('Tenants fetched:', tenantsData.length, 'tenants')
       
-      // Fetch units and bills separately for each tenant
+      // Helper function to get caretaker name from user_id
+      const getCaretakerName = async (userId: string): Promise<string | null> => {
+        try {
+          const { data } = await supabase
+            .from('caretakers')
+            .select('name')
+            .eq('user_id', userId)
+            .single()
+          return data?.name || null
+        } catch {
+          return null
+        }
+      }
+      
+      // Fetch units, bills, and audit trail info for each tenant
       const tenantsWithRelations = await Promise.all(
         tenantsData.map(async (tenant: any) => {
-          const [unitRes, billsRes] = await Promise.all([
+          const [unitRes, billsRes, createdByName, modifiedByName] = await Promise.all([
             tenant.unit_id
               ? supabase
                   .from('units')
@@ -128,7 +142,9 @@ export default function Tenants() {
             supabase
               .from('bills')
               .select('balance')
-              .eq('tenant_id', tenant.id)
+              .eq('tenant_id', tenant.id),
+            tenant.created_by_user_id ? getCaretakerName(tenant.created_by_user_id) : Promise.resolve(null),
+            tenant.modified_by_user_id ? getCaretakerName(tenant.modified_by_user_id) : Promise.resolve(null)
           ])
           
           // If unit found, get building name
@@ -156,7 +172,9 @@ export default function Tenants() {
           return {
             ...tenant,
             units: unitWithBuilding,
-            bills: billsRes.data || []
+            bills: billsRes.data || [],
+            created_by_name: await createdByName,
+            modified_by_name: await modifiedByName
           }
         })
       )
@@ -606,6 +624,7 @@ export default function Tenants() {
                   <th className="w-[80px] sm:w-[100px]">Unit</th>
                   <th className="w-[80px] sm:w-[100px]">Balance</th>
                   <th className="w-[70px] sm:w-[80px]">Status</th>
+                  <th className="w-[100px] sm:w-[120px]">Last Modified By</th>
                   <th className="w-[90px] sm:w-[100px]">Actions</th>
                 </tr>
               </thead>
@@ -659,6 +678,15 @@ export default function Tenants() {
                         <span className={`badge text-[10px] px-1.5 py-0.5 ${tenant.status === 'active' ? 'badge-success' : 'badge-warning'}`}>
                           {tenant.status}
                         </span>
+                      </td>
+                      <td className="text-xs">
+                        {tenant.modified_by_name ? (
+                          <span className="text-slate-600 dark:text-slate-400" title={`Modified by caretaker: ${tenant.modified_by_name}`}>
+                            👤 {tenant.modified_by_name}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">Manager</span>
+                        )}
                       </td>
                       <td>
                         <div className="flex gap-2 items-center">
