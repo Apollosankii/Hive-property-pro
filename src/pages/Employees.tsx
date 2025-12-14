@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, Employee, Caretaker, Building, supabaseUrl } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Edit, Trash2, Briefcase, AlertCircle, X, DollarSign, Users, Key, Copy, Check, Building2 } from 'lucide-react'
+import { Plus, Edit, Trash2, Briefcase, AlertCircle, X, DollarSign, Key, Copy, Check, Building2 } from 'lucide-react'
 
 // Unified employee type that can include caretaker info
 type UnifiedEmployee = Employee & {
@@ -16,7 +16,6 @@ export default function Employees() {
   const [showCredentialsModal, setShowCredentialsModal] = useState(false)
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null)
   const [newCaretakerCredentials, setNewCaretakerCredentials] = useState<{ email: string; password: string } | null>(null)
-  const [isPasswordReset, setIsPasswordReset] = useState(false)
   const [copiedField, setCopiedField] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
@@ -211,7 +210,7 @@ export default function Employees() {
       if (error) throw error
       return data
     },
-    onSuccess: async (newEmployee) => {
+    onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['employees'] })
       await queryClient.refetchQueries({ queryKey: ['employees'] })
       
@@ -219,7 +218,7 @@ export default function Employees() {
       if (createCaretakerAccount && email.trim()) {
         const password = generatePassword()
         try {
-          const result = await createCaretakerMutation.mutateAsync({
+          await createCaretakerMutation.mutateAsync({
             name: name.trim(),
             phone: phone.trim() || '',
             email: email.trim(),
@@ -234,10 +233,11 @@ export default function Employees() {
         }
       } else {
         // If editing and updating building assignments for existing caretaker
-        if (editingEmployee?.caretaker && selectedBuildings.length >= 0) {
+        const unifiedEmployee = editingEmployee as UnifiedEmployee | null
+        if (unifiedEmployee?.caretaker && selectedBuildings.length >= 0) {
           try {
             await assignBuildingsMutation.mutateAsync({
-              caretakerId: editingEmployee.caretaker.id,
+              caretakerId: unifiedEmployee.caretaker.id,
               buildingIds: selectedBuildings,
             })
           } catch (err: any) {
@@ -397,7 +397,6 @@ export default function Employees() {
       }
       
       setNewCaretakerCredentials(data.credentials)
-      setIsPasswordReset(false)
       queryClient.invalidateQueries({ queryKey: ['caretakers'] })
       queryClient.invalidateQueries({ queryKey: ['employees'] })
       // Credentials will be shown in the employee modal
@@ -463,7 +462,6 @@ export default function Employees() {
     },
     onSuccess: (credentials) => {
       setNewCaretakerCredentials(credentials)
-      setIsPasswordReset(true)
       setShowCredentialsModal(true)
       queryClient.invalidateQueries({ queryKey: ['caretakers'] })
       queryClient.invalidateQueries({ queryKey: ['employees'] })
@@ -488,11 +486,6 @@ export default function Employees() {
     setError(null)
   }
 
-  const handleDeleteCaretaker = (caretaker: Caretaker) => {
-    if (confirm(`Are you sure you want to delete ${caretaker.name}? This will permanently terminate their account.`)) {
-      deleteCaretakerMutation.mutate(caretaker)
-    }
-  }
 
   const handleResetPassword = (caretaker: Caretaker) => {
     if (confirm(`Reset password for ${caretaker.name}? New credentials will be generated.`)) {
@@ -657,7 +650,9 @@ export default function Employees() {
                             {employee.name}
                           </span>
                           {employee.isCaretaker && (
-                            <Key size={14} className="text-primary-600 dark:text-primary-400" title="Caretaker with portal access" />
+                            <span title="Caretaker with portal access">
+                              <Key size={14} className="text-primary-600 dark:text-primary-400" />
+                            </span>
                           )}
                         </div>
                       </td>
@@ -1003,7 +998,7 @@ export default function Employees() {
                 )}
 
                 {/* Show building assignments for existing caretakers */}
-                {editingEmployee && editingEmployee.caretaker && buildings && buildings.length > 0 && (
+                {editingEmployee && (editingEmployee as UnifiedEmployee).caretaker && buildings && buildings.length > 0 && (
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-200 mb-2">
                       Assigned Properties
@@ -1144,7 +1139,6 @@ export default function Employees() {
         <div className="modal-overlay" onClick={() => {
           setShowCredentialsModal(false)
           setNewCaretakerCredentials(null)
-          setIsPasswordReset(false)
         }}>
           <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
@@ -1206,7 +1200,6 @@ export default function Employees() {
                     onClick={() => {
                       setShowCredentialsModal(false)
                       setNewCaretakerCredentials(null)
-                      setIsPasswordReset(false)
                     }}
                     className="flex-1 btn btn-primary"
                   >
