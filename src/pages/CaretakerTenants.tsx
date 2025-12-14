@@ -42,9 +42,9 @@ export default function CaretakerTenants() {
     return data.publicUrl
   }
 
-  // Fetch all tenants (RLS will filter to show only manager's tenants)
+  // Fetch tenants filtered by caretaker's assigned buildings
   const { data: tenants, isLoading: tenantsLoading, error: tenantsError } = useQuery({
-    queryKey: ['tenants'],
+    queryKey: ['tenants', 'caretaker'],
     queryFn: async () => {
       // Check authentication
       const { data: { session } } = await supabase.auth.getSession()
@@ -53,11 +53,52 @@ export default function CaretakerTenants() {
         throw new Error('Not authenticated')
       }
       
-      console.log('CaretakerTenants: Fetching tenants for user:', session.user.id)
+      // Get caretaker's assigned buildings
+      const { data: caretakerData } = await supabase
+        .from('caretakers')
+        .select(`
+          id,
+          caretaker_buildings (
+            building_id
+          )
+        `)
+        .eq('user_id', session.user.id)
+        .single()
+      
+      if (!caretakerData) {
+        throw new Error('Caretaker record not found')
+      }
+      
+      const buildingIds = caretakerData.caretaker_buildings?.map((cb: any) => cb.building_id) || []
+      
+      if (buildingIds.length === 0) {
+        console.warn('CaretakerTenants: No buildings assigned to caretaker')
+        return []
+      }
+      
+      console.log('CaretakerTenants: Fetching tenants for buildings:', buildingIds)
+      
+      // Fetch units in assigned buildings, then get tenants for those units
+      const { data: unitsData, error: unitsError } = await supabase
+        .from('units')
+        .select('id')
+        .in('building_id', buildingIds)
+      
+      if (unitsError) {
+        console.error('CaretakerTenants: Error fetching units:', unitsError)
+        throw unitsError
+      }
+      
+      const unitIds = unitsData?.map(u => u.id) || []
+      
+      if (unitIds.length === 0) {
+        return []
+      }
       
       const { data: tenantsData, error: tenantsError } = await supabase
         .from('tenants')
         .select('*')
+        .in('unit_id', unitIds)
         .eq('status', 'active')
         .order('created_at', { ascending: false })
       

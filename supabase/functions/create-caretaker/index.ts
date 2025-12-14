@@ -97,7 +97,7 @@ serve(async (req) => {
       )
     }
 
-    const { name, phone, email, password } = requestData
+    const { name, phone, email, password, buildingIds } = requestData
 
     if (!name || !email || !password) {
       return new Response(
@@ -205,6 +205,23 @@ serve(async (req) => {
           status: 400,
         }
       )
+    }
+
+    // Assign buildings if provided
+    if (buildingIds && Array.isArray(buildingIds) && buildingIds.length > 0) {
+      const assignments = buildingIds.map((buildingId: string) => ({
+        caretaker_id: caretakerData.id,
+        building_id: buildingId,
+      }))
+
+      const { error: assignmentError } = await supabaseAdmin
+        .from('caretaker_buildings')
+        .insert(assignments)
+
+      if (assignmentError) {
+        console.error('Failed to assign buildings:', assignmentError)
+        // Don't fail the whole operation, just log the error
+      }
     }
 
     return new Response(

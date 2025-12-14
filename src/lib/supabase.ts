@@ -82,6 +82,15 @@ export interface Caretaker {
   status: 'active' | 'inactive'
   created_at: string
   updated_at: string
+  buildings?: Building[] // Assigned buildings
+}
+
+export interface CaretakerBuilding {
+  id: string
+  caretaker_id: string
+  building_id: string
+  created_at: string
+  building?: Building
 }
 
 export interface UtilityBillItem {

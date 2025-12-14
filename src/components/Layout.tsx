@@ -62,7 +62,7 @@ export default function Layout() {
     { icon: Receipt, label: 'Billing', path: '/billing' },
     { icon: CreditCard, label: 'Payments', path: '/payments' },
     { icon: Shield, label: 'Security Deposits', path: '/security-deposits' },
-    { icon: Briefcase, label: 'Employees', path: '/employees' },
+    { icon: Briefcase, label: 'Employees', path: '/employees', title: 'Employees (including caretakers)' },
     { icon: Wallet, label: 'Expenses', path: '/expenses' },
     { icon: Package, label: 'Inventory', path: '/inventory' },
     { icon: FileText, label: 'Reports', path: '/reports' },
@@ -165,7 +165,7 @@ export default function Layout() {
                     isActive ? 'sidebar-link-active' : 'sidebar-link-inactive'
                   } ${!sidebarOpen ? 'justify-center' : ''}`
                 }
-                title={!sidebarOpen ? item.label : ''}
+                title={!sidebarOpen ? (item.title || item.label) : (item.title || '')}
               >
                 <Icon size={20} className="flex-shrink-0" />
                 {sidebarOpen && (

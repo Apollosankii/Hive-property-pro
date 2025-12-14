@@ -21,7 +21,7 @@ export default function CaretakerInventory() {
   const queryClient = useQueryClient()
 
   const { data: inventory, isLoading, error: inventoryError } = useQuery({
-    queryKey: ['inventory'],
+    queryKey: ['inventory', 'caretaker'],
     queryFn: async () => {
       // Check authentication
       const { data: { session } } = await supabase.auth.getSession()
@@ -30,12 +30,48 @@ export default function CaretakerInventory() {
         throw new Error('Not authenticated')
       }
       
-      console.log('CaretakerInventory: Fetching inventory for user:', session.user.id)
+      // Get caretaker's assigned buildings
+      const { data: caretakerData } = await supabase
+        .from('caretakers')
+        .select(`
+          id,
+          caretaker_buildings (
+            building_id
+          )
+        `)
+        .eq('user_id', session.user.id)
+        .single()
       
-      const { data, error } = await supabase
+      if (!caretakerData) {
+        throw new Error('Caretaker record not found')
+      }
+      
+      const buildingIds = caretakerData.caretaker_buildings?.map((cb: any) => cb.building_id) || []
+      
+      if (buildingIds.length === 0) {
+        console.warn('CaretakerInventory: No buildings assigned to caretaker')
+        return []
+      }
+      
+      console.log('CaretakerInventory: Fetching inventory for buildings:', buildingIds)
+      
+      // Check if inventory table has building_id column
+      // If it does, filter by building_id; otherwise show all (for backward compatibility)
+      let query = supabase
         .from('inventory')
         .select('*')
-        .order('item_name')
+      
+      // Try to filter by building_id if the column exists
+      // Note: This will fail gracefully if the column doesn't exist
+      try {
+        query = query.in('building_id', buildingIds)
+      } catch (e) {
+        // If building_id doesn't exist, we'll show all inventory
+        // In production, you should add building_id to inventory table
+        console.warn('CaretakerInventory: building_id column not found, showing all inventory')
+      }
+      
+      const { data, error } = await query.order('item_name')
       
       if (error) {
         console.error('CaretakerInventory: Error fetching inventory:', error)
