@@ -1525,16 +1525,15 @@ export default function Billing() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Water Previous Reading <span className="text-xs text-slate-500 font-normal">(Read-only)</span>
+                      Water Previous Reading <span className="text-xs text-slate-500 font-normal">(Auto-filled — editable)</span>
                     </label>
                     <input
                       type="number"
                       step="0.01"
                       value={billFormData.water_prev_reading}
                       onChange={(e) => setBillFormData({ ...billFormData, water_prev_reading: e.target.value })}
-                      className="input bg-slate-50 dark:bg-zinc-900"
-                      readOnly
-                      title="Previous reading from this bill"
+                      className="input"
+                      title="Previous reading (editable)"
                     />
                   </div>
                   <div>
@@ -1574,16 +1573,15 @@ export default function Billing() {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Electricity Previous Reading <span className="text-xs text-slate-500 font-normal">(Read-only)</span>
+                      Electricity Previous Reading <span className="text-xs text-slate-500 font-normal">(Auto-filled — editable)</span>
                     </label>
                     <input
                       type="number"
                       step="0.01"
                       value={billFormData.elec_prev_reading}
                       onChange={(e) => setBillFormData({ ...billFormData, elec_prev_reading: e.target.value })}
-                      className="input bg-slate-50 dark:bg-zinc-900"
-                      readOnly
-                      title="Previous reading from this bill"
+                      className="input"
+                      title="Previous reading (editable)"
                     />
                   </div>
                   <div>
@@ -2045,16 +2043,15 @@ export default function Billing() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Water Previous Reading <span className="text-xs text-slate-500 font-normal">(Auto-filled)</span>
+                      Water Previous Reading <span className="text-xs text-slate-500 font-normal">(Auto-filled — editable)</span>
                     </label>
                     <input
                       type="number"
                       step="0.01"
                       value={billFormData.water_prev_reading}
                       onChange={(e) => setBillFormData({ ...billFormData, water_prev_reading: e.target.value })}
-                      className="input bg-slate-50 dark:bg-zinc-900"
-                      readOnly
-                      title="Automatically filled from the most recent bill for this unit"
+                      className="input"
+                      title="Automatically filled from the most recent bill for this unit (editable)"
                     />
                   </div>
                   <div>
@@ -2095,16 +2092,15 @@ export default function Billing() {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Electricity Previous Reading <span className="text-xs text-slate-500 font-normal">(Auto-filled)</span>
+                      Electricity Previous Reading <span className="text-xs text-slate-500 font-normal">(Auto-filled — editable)</span>
                     </label>
                     <input
                       type="number"
                       step="0.01"
                       value={billFormData.elec_prev_reading}
                       onChange={(e) => setBillFormData({ ...billFormData, elec_prev_reading: e.target.value })}
-                      className="input bg-slate-50 dark:bg-zinc-900"
-                      readOnly
-                      title="Automatically filled from the most recent bill for this unit"
+                      className="input"
+                      title="Automatically filled from the most recent bill for this unit (editable)"
                     />
                   </div>
                   <div>
