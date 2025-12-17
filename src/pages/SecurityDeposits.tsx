@@ -10,6 +10,7 @@ export default function SecurityDeposits() {
   const [damagesAmount, setDamagesAmount] = useState('')
   const [damagesDescription, setDamagesDescription] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
   const queryClient = useQueryClient()
 
   const { data: deposits, error: depositsError, isLoading: depositsLoading } = useQuery({
@@ -27,7 +28,7 @@ export default function SecurityDeposits() {
       
       if (error) throw error
 
-      // Fetch related data
+      // Fetch related data and normalize unit/building shape
       const depositsWithRelations = await Promise.all(
         (data || []).map(async (deposit: any) => {
           const [tenantRes, unitRes] = await Promise.all([
@@ -36,17 +37,32 @@ export default function SecurityDeposits() {
               .select('name, phone')
               .eq('id', deposit.tenant_id)
               .single(),
-            supabase
-              .from('units')
-              .select('unit_number, buildings(name)')
-              .eq('id', deposit.unit_id)
-              .single()
+            deposit.unit_id
+              ? supabase
+                  .from('units')
+                  .select('unit_number, building_id')
+                  .eq('id', deposit.unit_id)
+                  .single()
+              : Promise.resolve({ data: null, error: null })
           ])
+
+          // Resolve building name if available
+          let buildingName = null
+          if (unitRes.data?.building_id) {
+            const { data: buildingData } = await supabase
+              .from('buildings')
+              .select('name')
+              .eq('id', unitRes.data.building_id)
+              .single()
+            buildingName = buildingData?.name || null
+          }
 
           return {
             ...deposit,
             tenants: tenantRes.data,
             units: unitRes.data
+              ? { unit_number: unitRes.data.unit_number, buildings: buildingName ? { name: buildingName } : null }
+              : null,
           }
         })
       )
@@ -260,7 +276,17 @@ export default function SecurityDeposits() {
           <p className="mt-4 text-slate-600 dark:text-slate-400">Loading security deposits...</p>
         </div>
       ) : deposits && deposits.length > 0 ? (
-        <div className="card overflow-x-auto w-full">
+        <div>
+          <div className="p-3 flex items-center justify-end">
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search deposits..."
+              className="input w-64"
+            />
+          </div>
+          <div className="card overflow-x-auto w-full">
           <table className="table w-full text-xs sm:text-sm">
             <thead>
               <tr>
@@ -275,7 +301,16 @@ export default function SecurityDeposits() {
               </tr>
             </thead>
             <tbody>
-              {deposits.map((deposit: any) => (
+              {((deposits || [])
+                .filter((d: any) => {
+                  if (!search) return true
+                  const q = search.toLowerCase()
+                  return (
+                    (d.tenants?.name || '').toLowerCase().includes(q) ||
+                    (d.units?.unit_number || '').toString().toLowerCase().includes(q)
+                  )
+                })
+                .map((deposit: any) => (
                 <tr key={deposit.id}>
                   <td className="text-slate-700 dark:text-slate-300">
                     <div className="flex flex-col">

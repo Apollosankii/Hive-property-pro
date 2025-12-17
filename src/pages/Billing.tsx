@@ -45,6 +45,7 @@ export default function Billing() {
   // Utility consumptions state (for future utility types integration)
   // const [utilityConsumptions, setUtilityConsumptions] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
   const [showImportModal, setShowImportModal] = useState(false)
   const [importFile, setImportFile] = useState<File | null>(null)
   const [importProgress, setImportProgress] = useState(0)
@@ -140,6 +141,8 @@ export default function Billing() {
         })
       )
       
+      // Sort by unit number descending to show highest units first
+      billsWithRelations.sort((a: any, b: any) => (b.units?.unit_number || '').toString().localeCompare((a.units?.unit_number || '').toString()))
       return billsWithRelations
     },
     staleTime: 0,
@@ -201,6 +204,16 @@ export default function Billing() {
     },
     staleTime: 0,
     refetchOnMount: true,
+  })
+
+  const filteredBills = (bills || []).filter((b: any) => {
+    if (!search) return true
+    const q = search.toLowerCase()
+    return (
+      (b.units?.unit_number || '').toString().toLowerCase().includes(q) ||
+      (b.tenants?.name || '').toLowerCase().includes(q) ||
+      (b.units?.buildings?.name || '').toLowerCase().includes(q)
+    )
   })
 
   // Query to get all units for creating a single bill
@@ -286,12 +299,12 @@ export default function Billing() {
 
       // Use balance (which is automatically calculated by database: total_amount - amount_paid) as arrears
       // This ensures that if 9000 was paid on a 10000 bill, the remaining 1000 automatically becomes arrears
+      // Carry forward previous balance as arrears_brought_forward.
+      // Allow negative balances (overpayments) to be carried forward as negative arrears.
       const prevBalances = new Map(
         prevBills?.map((b) => {
-          const arrears = Math.max(0, b.balance || 0)
-          if (arrears > 0) {
-            console.log(`Unit ${b.unit_id}: Previous balance ${b.balance} will be carried forward as arrears`)
-          }
+          const arrears = (b.balance || 0)
+          console.log(`Unit ${b.unit_id}: Previous balance ${b.balance} will be carried forward as arrears_brought_forward`)
           return [b.unit_id, arrears]
         }) || []
       )
@@ -1118,6 +1131,16 @@ export default function Billing() {
         </div>
       )}
 
+      <div className="p-3 flex items-center justify-end">
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search bills..."
+          className="input w-64"
+        />
+      </div>
+
       {billsLoading ? (
         <div className="card">
           <div className="space-y-3">
@@ -1148,7 +1171,7 @@ export default function Billing() {
                   </tr>
                 </thead>
                 <tbody>
-                  {bills.map((bill: any) => {
+                  {filteredBills.map((bill: any) => {
                     const totalUtilities = (bill.garbage_amount || 0) + (bill.maintenance_amount || 0) + (bill.other_utilities_amount || 0)
                     return (
                       <tr key={bill.id}>

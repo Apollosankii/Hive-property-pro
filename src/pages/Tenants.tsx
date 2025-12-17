@@ -179,25 +179,21 @@ export default function Tenants() {
         })
       )
       
-      // Sort tenants by unit number in descending order
+      // Sort tenants by unit number in descending natural order (handles numeric and alphanumeric unit ids)
       // Tenants without units will appear at the end
       tenantsWithRelations.sort((a: any, b: any) => {
-        const unitA = a.units?.unit_number
-        const unitB = b.units?.unit_number
-        
-        // If both have units, compare by unit number (descending)
+        const unitA = a.units?.unit_number || ''
+        const unitB = b.units?.unit_number || ''
+
+        // If both have unit identifiers, compare using localeCompare with numeric option for natural sorting
         if (unitA && unitB) {
-          // Handle numeric and string unit numbers
-          const numA = typeof unitA === 'string' ? parseFloat(unitA) || 0 : unitA
-          const numB = typeof unitB === 'string' ? parseFloat(unitB) || 0 : unitB
-          return numB - numA // Descending order
+          return unitB.toString().localeCompare(unitA.toString(), undefined, { numeric: true, sensitivity: 'base' })
         }
-        
+
         // If only one has a unit, prioritize it
         if (unitA && !unitB) return -1
         if (!unitA && unitB) return 1
-        
-        // If neither has a unit, maintain original order
+
         return 0
       })
       

@@ -7,7 +7,12 @@ import { generateReceiptPDF } from '@/lib/pdf'
 
 export default function Payments() {
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [search, setSearch] = useState('')
   const [billId, setBillId] = useState('')
+  const [filterType, setFilterType] = useState<'unit' | 'tenant'>('unit')
+  const [selectedEntityId, setSelectedEntityId] = useState('')
+  const [unitsList, setUnitsList] = useState<any[]>([])
+  const [tenantsList, setTenantsList] = useState<any[]>([])
   const [amount, setAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'mpesa' | 'bank'>('cash')
   const [receiptFile, setReceiptFile] = useState<File | null>(null)
@@ -82,11 +87,26 @@ export default function Payments() {
         })
       )
       
+      // Sort bills descending by unit number to avoid confusion when selecting
+      billsWithRelations.sort((a: any, b: any) => (b.units?.unit_number || '').toString().localeCompare((a.units?.unit_number || '').toString()))
+
       return billsWithRelations
     },
     staleTime: 0,
     refetchOnMount: true,
     refetchOnWindowFocus: true,
+  })
+
+  const filteredPayments = (payments || []).filter((p: any) => {
+    if (!search) return true
+    const q = search.toLowerCase()
+    return (
+      (p.tenants?.name || '').toLowerCase().includes(q) ||
+      (p.units?.unit_number || '').toString().toLowerCase().includes(q) ||
+      (p.units?.buildings?.name || '').toLowerCase().includes(q) ||
+      (p.bills?.billing_month || '').toString().toLowerCase().includes(q) ||
+      (p.payment_method || '').toLowerCase().includes(q)
+    )
   })
 
   const { data: payments, error: paymentsError, isLoading: paymentsLoading } = useQuery({
@@ -173,6 +193,88 @@ export default function Payments() {
     refetchOnMount: true,
     refetchOnWindowFocus: true,
   })
+
+  // Fetch units and tenants lists for filtering
+  useQuery({
+    queryKey: ['units-list'],
+    queryFn: async () => {
+      const { data: unitsData, error } = await supabase
+        .from('units')
+        .select('id,unit_number,building_id')
+        .order('unit_number', { ascending: false })
+      if (error) throw error
+
+      const unitsWithBuildings = await Promise.all((unitsData || []).map(async (u: any) => {
+        let buildingName = null
+        if (u.building_id) {
+          const { data: b } = await supabase.from('buildings').select('name').eq('id', u.building_id).single()
+          buildingName = b?.name || null
+        }
+        return { id: u.id, unit_number: u.unit_number, building: buildingName }
+      }))
+
+      setUnitsList(unitsWithBuildings)
+      return unitsWithBuildings
+    },
+    staleTime: 1000 * 60 * 5,
+  })
+
+  useQuery({
+    queryKey: ['tenants-list'],
+    queryFn: async () => {
+      const { data: tenantsData, error } = await supabase
+        .from('tenants')
+        .select('id,name')
+        .order('name')
+      if (error) throw error
+      setTenantsList(tenantsData || [])
+      return tenantsData || []
+    },
+    staleTime: 1000 * 60 * 5,
+  })
+
+  const { data: paymentsByEntity, isLoading: paymentsByEntityLoading } = useQuery({
+    queryKey: ['payments-by-entity', filterType, selectedEntityId],
+    enabled: !!selectedEntityId,
+    queryFn: async () => {
+      const field = filterType === 'unit' ? 'unit_id' : 'tenant_id'
+      const { data: paymentsData, error } = await supabase
+        .from('payments')
+        .select('*')
+        .eq(field, selectedEntityId)
+        .order('payment_date', { ascending: false })
+      if (error) throw error
+
+      // Attach related data (bill month, unit number, building, tenant name)
+      const withRelations = await Promise.all((paymentsData || []).map(async (p: any) => {
+        const [billRes, unitRes, tenantRes] = await Promise.all([
+          p.bill_id ? supabase.from('bills').select('billing_month').eq('id', p.bill_id).single() : Promise.resolve({ data: null }),
+          p.unit_id ? supabase.from('units').select('unit_number,building_id').eq('id', p.unit_id).single() : Promise.resolve({ data: null }),
+          p.tenant_id ? supabase.from('tenants').select('name').eq('id', p.tenant_id).single() : Promise.resolve({ data: null }),
+        ])
+        let buildingName = null
+        if (unitRes.data?.building_id) {
+          const { data: b } = await supabase.from('buildings').select('name').eq('id', unitRes.data.building_id).single()
+          buildingName = b?.name || null
+        }
+        return {
+          ...p,
+          bills: billRes.data ? { billing_month: billRes.data.billing_month } : null,
+          units: unitRes.data ? { unit_number: unitRes.data.unit_number, buildings: buildingName ? { name: buildingName } : null } : null,
+          tenants: tenantRes.data ? { name: tenantRes.data.name } : null,
+        }
+      }))
+
+      return withRelations
+    },
+  })
+
+  const paymentsSummary = (paymentsByEntity || []).reduce((acc: any, p: any) => {
+    acc.total = (acc.total || 0) + (p.amount || 0)
+    acc.count = (acc.count || 0) + 1
+    acc.last = acc.last || p.payment_date
+    return acc
+  }, { total: 0, count: 0, last: null })
 
   const uploadReceipt = async (file: File): Promise<string> => {
     const fileExt = file.name.split('.').pop()
@@ -309,6 +411,40 @@ export default function Payments() {
       </div>
 
       <div className="card overflow-x-auto w-full">
+        <div className="p-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <select value={filterType} onChange={(e) => { setFilterType(e.target.value as any); setSelectedEntityId('') }} className="input">
+              <option value="unit">Unit</option>
+              <option value="tenant">Tenant</option>
+            </select>
+            <select
+              value={selectedEntityId}
+              onChange={(e) => setSelectedEntityId(e.target.value)}
+              className="input w-64"
+            >
+              <option value="">Select {filterType}</option>
+              {filterType === 'unit' ? (
+                unitsList.map((u) => (
+                  <option key={u.id} value={u.id}>{u.unit_number} {u.building ? `(${u.building})` : ''}</option>
+                ))
+              ) : (
+                tenantsList.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))
+              )}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search payments..."
+              className="input w-64"
+            />
+          </div>
+        </div>
         <table className="table w-full text-xs sm:text-sm">
           <thead>
             <tr>
@@ -323,7 +459,7 @@ export default function Payments() {
             </tr>
           </thead>
           <tbody>
-            {paymentsError && (
+              {paymentsError && (
               <tr>
                 <td colSpan={7} className="p-4 text-center">
                   <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
@@ -341,8 +477,8 @@ export default function Payments() {
                   <p className="mt-2 text-slate-600">Loading payments...</p>
                 </td>
               </tr>
-            ) : payments && payments.length > 0 ? (
-              payments.map((payment: any) => (
+            ) : filteredPayments && filteredPayments.length > 0 ? (
+              filteredPayments.map((payment: any) => (
               <tr key={payment.id}>
                 <td>{formatDate(payment.payment_date)}</td>
                 <td>{payment.tenants?.name || 'N/A'}</td>
@@ -461,7 +597,6 @@ export default function Payments() {
                   required
                   className="input"
                   placeholder="0.00"
-                  max={selectedBill?.balance}
                 />
               </div>
               <div>
