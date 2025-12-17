@@ -251,6 +251,15 @@ export default function SecurityDeposits() {
     })
   }
 
+  const visibleDeposits = (deposits || []).filter((d: any) => {
+    if (!search) return true
+    const q = search.toLowerCase()
+    return (
+      (d.tenants?.name || '').toLowerCase().includes(q) ||
+      (d.units?.unit_number || '').toString().toLowerCase().includes(q)
+    )
+  })
+
   return (
     <div className="space-y-4 animate-fade-in w-full max-w-full overflow-x-hidden">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -270,12 +279,14 @@ export default function SecurityDeposits() {
         </div>
       )}
 
-      {depositsLoading ? (
+      {depositsLoading && (
         <div className="card text-center py-16">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
           <p className="mt-4 text-slate-600 dark:text-slate-400">Loading security deposits...</p>
         </div>
-      ) : deposits && deposits.length > 0 ? (
+      )}
+
+      {!depositsLoading && deposits && deposits.length > 0 && (
         <div>
           <div className="p-3 flex items-center justify-end">
             <input
@@ -287,95 +298,89 @@ export default function SecurityDeposits() {
             />
           </div>
           <div className="card overflow-x-auto w-full">
-          <table className="table w-full text-xs sm:text-sm">
-            <thead>
-              <tr>
-                <th className="min-w-[120px]">Tenant</th>
-                <th className="min-w-[100px]">Unit</th>
-                <th className="min-w-[100px]">Amount</th>
-                <th className="min-w-[100px]">Deductions</th>
-                <th className="min-w-[100px]">Refund</th>
-                <th className="min-w-[80px]">Status</th>
-                <th className="min-w-[100px]">Date Deposited</th>
-                <th className="min-w-[120px]">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {((deposits || [])
-                .filter((d: any) => {
-                  if (!search) return true
-                  const q = search.toLowerCase()
-                  return (
-                    (d.tenants?.name || '').toLowerCase().includes(q) ||
-                    (d.units?.unit_number || '').toString().toLowerCase().includes(q)
-                  )
-                })
-                .map((deposit: any) => (
-                <tr key={deposit.id}>
-                  <td className="text-slate-700 dark:text-slate-300">
-                    <div className="flex flex-col">
-                      <span className="font-semibold">{deposit.tenants?.name || 'N/A'}</span>
-                      <span className="text-xs text-slate-500 dark:text-slate-400">
-                        {deposit.tenants?.phone || ''}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="text-slate-600 dark:text-slate-400">
-                    {deposit.units?.unit_number} ({deposit.units?.buildings?.name})
-                  </td>
-                  <td className="font-bold text-slate-900 dark:text-slate-100">
-                    {formatCurrency(deposit.amount)}
-                  </td>
-                  <td className="font-medium text-red-600 dark:text-red-400">
-                    {formatCurrency(deposit.total_deductions || 0)}
-                  </td>
-                  <td className="font-bold text-emerald-600 dark:text-emerald-400">
-                    {formatCurrency(deposit.refund_amount || 0)}
-                  </td>
-                  <td>
-                    <span
-                      className={`badge text-[10px] px-1.5 py-0.5 ${
-                        deposit.status === 'active'
-                          ? 'badge-success'
-                          : deposit.status === 'refunded'
-                          ? 'badge-info'
-                          : deposit.status === 'processing'
-                          ? 'badge-warning'
-                          : 'badge-danger'
-                      }`}
-                    >
-                      {deposit.status}
-                    </span>
-                  </td>
-                  <td className="text-slate-600 dark:text-slate-400">
-                    {formatDate(deposit.date_deposited)}
-                  </td>
-                  <td>
-                    <div className="flex items-center gap-1">
-                      {deposit.status === 'active' && (
-                        <button
-                          onClick={() => handleProcessLeaseEnd(deposit)}
-                          className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
-                          title="Process Lease End"
-                        >
-                          <FileText size={14} />
-                        </button>
-                      )}
-                      <button
-                        onClick={() => setSelectedDeposit(deposit)}
-                        className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
-                        title="View Details"
-                      >
-                        <Shield size={14} />
-                      </button>
-                    </div>
-                  </td>
+            <table className="table w-full text-xs sm:text-sm">
+              <thead>
+                <tr>
+                  <th className="min-w-[120px]">Tenant</th>
+                  <th className="min-w-[100px]">Unit</th>
+                  <th className="min-w-[100px]">Amount</th>
+                  <th className="min-w-[100px]">Deductions</th>
+                  <th className="min-w-[100px]">Refund</th>
+                  <th className="min-w-[80px]">Status</th>
+                  <th className="min-w-[100px]">Date Deposited</th>
+                  <th className="min-w-[120px]">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {visibleDeposits.map((deposit: any) => (
+                  <tr key={deposit.id}>
+                    <td className="text-slate-700 dark:text-slate-300">
+                      <div className="flex flex-col">
+                        <span className="font-semibold">{deposit.tenants?.name || 'N/A'}</span>
+                        <span className="text-xs text-slate-500 dark:text-slate-400">
+                          {deposit.tenants?.phone || ''}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="text-slate-600 dark:text-slate-400">
+                      {deposit.units?.unit_number} ({deposit.units?.buildings?.name})
+                    </td>
+                    <td className="font-bold text-slate-900 dark:text-slate-100">
+                      {formatCurrency(deposit.amount)}
+                    </td>
+                    <td className="font-medium text-red-600 dark:text-red-400">
+                      {formatCurrency(deposit.total_deductions || 0)}
+                    </td>
+                    <td className="font-bold text-emerald-600 dark:text-emerald-400">
+                      {formatCurrency(deposit.refund_amount || 0)}
+                    </td>
+                    <td>
+                      <span
+                        className={`badge text-[10px] px-1.5 py-0.5 ${
+                          deposit.status === 'active'
+                            ? 'badge-success'
+                            : deposit.status === 'refunded'
+                            ? 'badge-info'
+                            : deposit.status === 'processing'
+                            ? 'badge-warning'
+                            : 'badge-danger'
+                        }`}
+                      >
+                        {deposit.status}
+                      </span>
+                    </td>
+                    <td className="text-slate-600 dark:text-slate-400">
+                      {formatDate(deposit.date_deposited)}
+                    </td>
+                    <td>
+                      <div className="flex items-center gap-1">
+                        {deposit.status === 'active' && (
+                          <button
+                            onClick={() => handleProcessLeaseEnd(deposit)}
+                            className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
+                            title="Process Lease End"
+                          >
+                            <FileText size={14} />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setSelectedDeposit(deposit)}
+                          className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
+                          title="View Details"
+                        >
+                          <Shield size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      ) : (
+      )}
+
+      {!depositsLoading && (!deposits || deposits.length === 0) && (
         <div className="card text-center py-16">
           <div className="w-20 h-20 bg-slate-100 dark:bg-zinc-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <Shield className="text-slate-400" size={40} />

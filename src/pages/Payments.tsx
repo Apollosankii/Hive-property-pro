@@ -97,17 +97,7 @@ export default function Payments() {
     refetchOnWindowFocus: true,
   })
 
-  const filteredPayments = (payments || []).filter((p: any) => {
-    if (!search) return true
-    const q = search.toLowerCase()
-    return (
-      (p.tenants?.name || '').toLowerCase().includes(q) ||
-      (p.units?.unit_number || '').toString().toLowerCase().includes(q) ||
-      (p.units?.buildings?.name || '').toLowerCase().includes(q) ||
-      (p.bills?.billing_month || '').toString().toLowerCase().includes(q) ||
-      (p.payment_method || '').toLowerCase().includes(q)
-    )
-  })
+  
 
   const { data: payments, error: paymentsError, isLoading: paymentsLoading } = useQuery({
     queryKey: ['payments'],
@@ -233,7 +223,7 @@ export default function Payments() {
     staleTime: 1000 * 60 * 5,
   })
 
-  const { data: paymentsByEntity, isLoading: paymentsByEntityLoading } = useQuery({
+  const { data: paymentsByEntity, isLoading: _paymentsByEntityLoading } = useQuery({
     queryKey: ['payments-by-entity', filterType, selectedEntityId],
     enabled: !!selectedEntityId,
     queryFn: async () => {
@@ -275,6 +265,18 @@ export default function Payments() {
     acc.last = acc.last || p.payment_date
     return acc
   }, { total: 0, count: 0, last: null })
+
+  const filteredPayments = (payments || []).filter((p: any) => {
+    if (!search) return true
+    const q = search.toLowerCase()
+    return (
+      (p.tenants?.name || '').toLowerCase().includes(q) ||
+      (p.units?.unit_number || '').toString().toLowerCase().includes(q) ||
+      (p.units?.buildings?.name || '').toLowerCase().includes(q) ||
+      (p.bills?.billing_month || '').toString().toLowerCase().includes(q) ||
+      (p.payment_method || '').toLowerCase().includes(q)
+    )
+  })
 
   const uploadReceipt = async (file: File): Promise<string> => {
     const fileExt = file.name.split('.').pop()
@@ -445,6 +447,22 @@ export default function Payments() {
             />
           </div>
         </div>
+        {selectedEntityId && paymentsByEntity && (
+          <div className="p-3 grid grid-cols-3 gap-3">
+            <div className="p-3 bg-slate-50 rounded-xl">
+              <div className="text-sm text-slate-600">Total Paid</div>
+              <div className="font-bold text-slate-900">{formatCurrency(paymentsSummary.total || 0)}</div>
+            </div>
+            <div className="p-3 bg-slate-50 rounded-xl">
+              <div className="text-sm text-slate-600">Payments</div>
+              <div className="font-bold text-slate-900">{paymentsSummary.count || 0}</div>
+            </div>
+            <div className="p-3 bg-slate-50 rounded-xl">
+              <div className="text-sm text-slate-600">Last Payment</div>
+              <div className="font-bold text-slate-900">{paymentsSummary.last ? formatDate(paymentsSummary.last) : 'N/A'}</div>
+            </div>
+          </div>
+        )}
         <table className="table w-full text-xs sm:text-sm">
           <thead>
             <tr>
