@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/utils'
 import { Users, DollarSign, AlertCircle, Home, TrendingUp, ArrowRight, Calendar, Briefcase, Wallet, Package } from 'lucide-react'
@@ -8,16 +9,37 @@ import { OccupancyChart } from '@/components/charts/OccupancyChart'
 import { FinancialOverviewChart } from '@/components/charts/FinancialOverviewChart'
 
 export default function Dashboard() {
+  const [selectedMonth, setSelectedMonth] = useState<string>('')
+
   const { data: stats } = useQuery({
-    queryKey: ['dashboard-stats'],
+    queryKey: ['dashboard-stats', selectedMonth],
     queryFn: async () => {
+      let startDate = ''
+      let endDate = ''
+      if (selectedMonth) {
+        const [y, m] = selectedMonth.split('-').map(Number)
+        const first = new Date(y, m - 1, 1)
+        const last = new Date(y, m, 0)
+        startDate = first.toISOString().split('T')[0]
+        endDate = last.toISOString().split('T')[0]
+      }
       const [tenantsRes, billsRes, unitsRes, paymentsRes, expensesRes, salariesRes, inventoryRes, employeesRes] = await Promise.all([
         supabase.from('tenants').select('id, status').eq('status', 'active'),
-        supabase.from('bills').select('total_amount, amount_paid, balance, status'),
+        // bills within month if selected, otherwise all
+        (selectedMonth
+          ? supabase.from('bills').select('total_amount, amount_paid, balance, status, created_at').gte('created_at', startDate).lte('created_at', endDate)
+          : supabase.from('bills').select('total_amount, amount_paid, balance, status')),
         supabase.from('units').select('id, status'),
-        supabase.from('payments').select('amount'),
-        supabase.from('expenses').select('amount'),
-        supabase.from('salaries').select('total_amount, amount_paid'),
+        // payments within month if selected, otherwise all
+        (selectedMonth
+          ? supabase.from('payments').select('amount').gte('payment_date', startDate).lte('payment_date', endDate)
+          : supabase.from('payments').select('amount')),
+        (selectedMonth
+          ? supabase.from('expenses').select('amount').gte('expense_date', startDate).lte('expense_date', endDate)
+          : supabase.from('expenses').select('amount')),
+        (selectedMonth
+          ? supabase.from('salaries').select('total_amount, amount_paid').gte('salary_month', startDate).lte('salary_month', endDate)
+          : supabase.from('salaries').select('total_amount, amount_paid')),
         supabase.from('inventory').select('total_value, status'),
         supabase.from('employees').select('id, status').eq('status', 'active'),
       ])
@@ -68,14 +90,23 @@ export default function Dashboard() {
   })
 
   const { data: recentPayments, isLoading: paymentsLoading } = useQuery({
-    queryKey: ['recent-payments'],
+    queryKey: ['recent-payments', selectedMonth],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let q = supabase
         .from('payments')
         .select('*, tenants(name), units(unit_number), buildings(name)')
         .order('created_at', { ascending: false })
         .limit(10)
-      
+
+      if (selectedMonth) {
+        const [y, m] = selectedMonth.split('-').map(Number)
+        const first = new Date(y, m - 1, 1).toISOString().split('T')[0]
+        const last = new Date(y, m, 0).toISOString().split('T')[0]
+        q = q.gte('payment_date', first).lte('payment_date', last)
+      }
+
+      const { data, error } = await q
+
       if (error) throw error
       return data
     },
@@ -85,12 +116,36 @@ export default function Dashboard() {
 
   // Query for monthly financial data (last 6 months)
   const { data: monthlyFinancialData } = useQuery({
-    queryKey: ['monthly-financial-data'],
+    queryKey: ['monthly-financial-data', selectedMonth],
     queryFn: async () => {
+      // If a month is selected, produce a single-month dataset for that month
+      if (selectedMonth) {
+        const [y, m] = selectedMonth.split('-').map(Number)
+        const first = new Date(y, m - 1, 1).toISOString().split('T')[0]
+        const last = new Date(y, m, 0).toISOString().split('T')[0]
+
+        const [paymentsRes, expensesRes, salariesRes] = await Promise.all([
+          supabase.from('payments').select('payment_date, amount').gte('payment_date', first).lte('payment_date', last),
+          supabase.from('expenses').select('expense_date, amount').gte('expense_date', first).lte('expense_date', last),
+          supabase.from('salaries').select('salary_month, amount_paid').gte('salary_month', first).lte('salary_month', last),
+        ])
+
+        const monthKey = new Date(y, m - 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+        let revenue = 0
+        let expenses = 0
+
+        paymentsRes.data?.forEach((p: any) => revenue += p.amount || 0)
+        expensesRes.data?.forEach((e: any) => expenses += e.amount || 0)
+        salariesRes.data?.forEach((s: any) => expenses += s.amount_paid || 0)
+
+        return [{ month: monthKey, revenue, expenses, profit: revenue - expenses }]
+      }
+
+      // Default: last 6 months
       const now = new Date()
       const sixMonthsAgo = new Date()
       sixMonthsAgo.setMonth(now.getMonth() - 6)
-      
+
       const startDate = sixMonthsAgo.toISOString().split('T')[0]
       const endDate = now.toISOString().split('T')[0]
 
@@ -114,7 +169,7 @@ export default function Dashboard() {
 
       // Group by month
       const monthlyData: Record<string, { revenue: number; expenses: number; salaries: number }> = {}
-      
+
       // Initialize last 6 months
       for (let i = 5; i >= 0; i--) {
         const date = new Date()
@@ -207,7 +262,21 @@ export default function Dashboard() {
           </h1>
           <p className="text-slate-600 dark:text-zinc-400 mt-1">Welcome back! Here's what's happening today.</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-3 items-center">
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-slate-600 dark:text-zinc-400">Month:</label>
+            <input
+              type="month"
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="input input-sm"
+            />
+            {selectedMonth && (
+              <button onClick={() => setSelectedMonth('')} className="btn btn-ghost btn-sm">
+                Clear
+              </button>
+            )}
+          </div>
           <Link to="/billing" className="btn btn-primary">
             <Calendar size={18} className="text-current" />
             Generate Bills
@@ -325,7 +394,9 @@ export default function Dashboard() {
             <div className="p-2.5 bg-emerald-100 dark:bg-emerald-900/30 rounded-xl">
               <TrendingUp className="text-emerald-600 dark:text-emerald-400" size={20} />
             </div>
-            <h3 className="font-semibold text-lg text-slate-900 dark:text-zinc-50">Revenue Trends (Last 6 Months)</h3>
+            <h3 className="font-semibold text-lg text-slate-900 dark:text-zinc-50">
+              Revenue Trends {selectedMonth ? `(${new Date(selectedMonth + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })})` : '(Last 6 Months)'}
+            </h3>
           </div>
           {monthlyFinancialData && monthlyFinancialData.length > 0 ? (
             <RevenueChart data={monthlyFinancialData} />
@@ -357,7 +428,9 @@ export default function Dashboard() {
           <div className="p-2.5 bg-purple-100 dark:bg-purple-900/30 rounded-xl">
             <DollarSign className="text-purple-600 dark:text-purple-400" size={20} />
           </div>
-          <h3 className="font-semibold text-lg text-slate-900 dark:text-zinc-50">Financial Overview (Last 6 Months)</h3>
+          <h3 className="font-semibold text-lg text-slate-900 dark:text-zinc-50">
+            Financial Overview {selectedMonth ? `(${new Date(selectedMonth + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })})` : '(Last 6 Months)'}
+          </h3>
         </div>
         {monthlyFinancialData && monthlyFinancialData.length > 0 ? (
           <FinancialOverviewChart data={monthlyFinancialData} />
