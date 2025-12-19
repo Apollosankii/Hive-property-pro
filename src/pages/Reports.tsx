@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { FileSpreadsheet } from 'lucide-react'
+import { FileSpreadsheet, FileText } from 'lucide-react'
 import { exportToExcel } from '@/lib/excel'
+import { exportElementToPDF } from '@/lib/pdf'
 import { RevenueChart } from '@/components/charts/RevenueChart'
 import { OccupancyChart } from '@/components/charts/OccupancyChart'
 import { ExpenseBreakdownChart } from '@/components/charts/ExpenseBreakdownChart'
@@ -666,10 +667,21 @@ export default function Reports() {
             <FileSpreadsheet size={20} />
             Export to Excel
           </button>
+          <button
+            onClick={async () => {
+              const filename = `${reportType}-report-${startDate}-${endDate}.pdf`
+              // Export the main report card area
+              await exportElementToPDF('report-area', filename)
+            }}
+            className="btn btn-outline flex items-center gap-2"
+          >
+            <FileText size={18} />
+            Export as PDF
+          </button>
         </div>
       </div>
 
-      <div className="card">
+      <div className="card" id="report-area">
         <div className="flex gap-4 mb-6 flex-wrap">
           <button
             onClick={() => setReportType('revenue')}

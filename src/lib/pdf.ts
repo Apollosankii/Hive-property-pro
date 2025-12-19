@@ -248,3 +248,40 @@ export async function generateBulkInvoicesPDF(bills: any[]) {
   doc.save(`invoices-${formatDate(new Date().toISOString()).replace(/\//g, '-')}.pdf`)
 }
 
+// Export an arbitrary DOM element (by id) as a PDF using html2canvas + jsPDF
+export async function exportElementToPDF(elementId: string, filename = 'report.pdf') {
+  // Dynamically import html2canvas to keep bundle smaller
+  const html2canvas = (await import('html2canvas')).default
+
+  const element = document.getElementById(elementId)
+  if (!element) {
+    console.warn('exportElementToPDF: element not found', elementId)
+    return
+  }
+
+  // Render element to canvas
+  const canvas = await html2canvas(element as HTMLElement, { scale: 2, useCORS: true })
+  const imgData = canvas.toDataURL('image/png')
+
+  const pdf = new jsPDF('p', 'mm', 'a4')
+  const imgProps = pdf.getImageProperties(imgData)
+  const pdfWidth = pdf.internal.pageSize.getWidth()
+  const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width
+  const pageHeight = pdf.internal.pageSize.getHeight()
+
+  let heightLeft = pdfHeight
+  let position = 0
+
+  pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight)
+  heightLeft -= pageHeight
+
+  while (heightLeft > 0) {
+    position = heightLeft - pdfHeight
+    pdf.addPage()
+    pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight)
+    heightLeft -= pageHeight
+  }
+
+  pdf.save(filename)
+}
+
