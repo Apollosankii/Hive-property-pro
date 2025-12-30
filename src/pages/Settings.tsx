@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '@/store/authStore'
 import { supabase, UtilityType } from '@/lib/supabase'
@@ -8,6 +8,7 @@ export default function Settings() {
   const { user } = useAuthStore()
   const [waterRate, setWaterRate] = useState('')
   const [elecRate, setElecRate] = useState('')
+  const [initialized, setInitialized] = useState(false)
   const [isUtilityModalOpen, setIsUtilityModalOpen] = useState(false)
   const [editingUtility, setEditingUtility] = useState<UtilityType | null>(null)
   const [utilityFormData, setUtilityFormData] = useState({
@@ -167,19 +168,26 @@ export default function Settings() {
     },
   })
 
+  useEffect(() => {
+    if (!initialized && settings) {
+      setWaterRate(settings?.water_rate?.toString() ?? '')
+      setElecRate(settings?.elec_rate?.toString() ?? '')
+      setInitialized(true)
+    }
+  }, [settings, initialized])
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault()
-    // Allow 0 or any positive number - save exactly what user enters
-    // If empty, keep existing value; if 0, save 0; if number, save that number
     // Parse values robustly so entries like "0.0" or "00" are handled correctly.
-    const parseRate = (input: string, fallback: number) => {
-      if (input === '') return fallback
+    // If the user clears the input we now treat it as 0.
+    const parseRate = (input: string) => {
+      if (input === '') return 0
       const n = Number(input)
-      return Number.isFinite(n) ? n : fallback
+      return Number.isFinite(n) ? n : 0
     }
 
-    const newWaterRate = parseRate(waterRate, settings?.water_rate ?? 50)
-    const newElecRate = parseRate(elecRate, settings?.elec_rate ?? 15)
+    const newWaterRate = parseRate(waterRate)
+    const newElecRate = parseRate(elecRate)
     
     console.log('Saving rates:', { newWaterRate, newElecRate, waterRate, elecRate })
     
@@ -267,7 +275,7 @@ export default function Settings() {
               type="number"
               step="0.01"
               min="0"
-              value={waterRate !== '' ? waterRate : (settings?.water_rate?.toString() || '')}
+              value={waterRate}
               onChange={(e) => setWaterRate(e.target.value)}
               className="input"
               placeholder="50"
@@ -285,7 +293,7 @@ export default function Settings() {
               type="number"
               step="0.01"
               min="0"
-              value={elecRate !== '' ? elecRate : (settings?.elec_rate?.toString() || '')}
+              value={elecRate}
               onChange={(e) => setElecRate(e.target.value)}
               className="input"
               placeholder="15"
