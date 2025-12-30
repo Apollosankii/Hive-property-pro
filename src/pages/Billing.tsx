@@ -471,7 +471,41 @@ export default function Billing() {
       alert('No occupied units found. Please assign tenants to units first.')
       return
     }
-    setShowMeterModal(true)
+
+    // Pre-fill meter readings from latest bills for each occupied unit so users see previous readings
+    ;(async () => {
+      try {
+        const readingsMap: Record<string, any> = {}
+        await Promise.all(
+          occupiedUnits.map(async (unit: any) => {
+            const latest = await fetchLatestMeterReadings(unit.id)
+            readingsMap[unit.id] = {
+              water_prev: latest.water || 0,
+              water_current: latest.water || 0,
+              elec_prev: latest.elec || 0,
+              elec_current: latest.elec || 0,
+            }
+          })
+        )
+
+        setMeterReadings(readingsMap)
+
+        // Pre-fill bulkRates from settings if available
+        const storedSettings = localStorage.getItem('app-settings')
+        const parsedSettings = storedSettings ? JSON.parse(storedSettings) : null
+        setBulkRates({
+          water_rate: parsedSettings?.water_rate?.toString() || '',
+          elec_rate: parsedSettings?.elec_rate?.toString() || '',
+        })
+
+        setShowMeterModal(true)
+      } catch (err) {
+        console.error('Failed to prefill meter readings:', err)
+        // fallback: still open modal but with empty readings
+        setMeterReadings({})
+        setShowMeterModal(true)
+      }
+    })()
   }
 
   const handleGenerate = () => {
@@ -1065,7 +1099,7 @@ export default function Billing() {
           <button
             onClick={handleGenerateBills}
             className="btn btn-primary"
-            disabled={occupiedUnitsError !== undefined}
+            disabled={!!occupiedUnitsError || !occupiedUnits || occupiedUnits.length === 0}
           >
             <Plus size={18} className="sm:size-5" />
             <span className="hidden sm:inline">Generate Bills</span>
