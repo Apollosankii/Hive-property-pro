@@ -171,12 +171,15 @@ export default function Settings() {
     e.preventDefault()
     // Allow 0 or any positive number - save exactly what user enters
     // If empty, keep existing value; if 0, save 0; if number, save that number
-    const newWaterRate = waterRate === '' 
-      ? (settings?.water_rate ?? 50) 
-      : (waterRate === '0' ? 0 : (parseFloat(waterRate) || settings?.water_rate || 50))
-    const newElecRate = elecRate === '' 
-      ? (settings?.elec_rate ?? 15) 
-      : (elecRate === '0' ? 0 : (parseFloat(elecRate) || settings?.elec_rate || 15))
+    // Parse values robustly so entries like "0.0" or "00" are handled correctly.
+    const parseRate = (input: string, fallback: number) => {
+      if (input === '') return fallback
+      const n = Number(input)
+      return Number.isFinite(n) ? n : fallback
+    }
+
+    const newWaterRate = parseRate(waterRate, settings?.water_rate ?? 50)
+    const newElecRate = parseRate(elecRate, settings?.elec_rate ?? 15)
     
     console.log('Saving rates:', { newWaterRate, newElecRate, waterRate, elecRate })
     
