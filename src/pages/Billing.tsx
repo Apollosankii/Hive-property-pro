@@ -949,7 +949,8 @@ export default function Billing() {
       elec_current_reading: 0,
       elec_rate: 15,
       rent_amount: 0,
-      arrears_brought_forward: prevBalance > 0 ? prevBalance : 0,
+      // Allow negative prevBalance (overpayments) to be carried forward as negative arrears
+      arrears_brought_forward: prevBalance,
       garbage_amount: garbageAmount,
       maintenance_amount: maintenanceAmount,
       other_utilities_amount: otherUtilitiesAmount,
@@ -1831,7 +1832,8 @@ export default function Billing() {
                             const prevBalance = prevBill ? (prevBill.total_amount - prevBill.amount_paid) : 0
                             setBillFormData(prev => ({
                               ...prev,
-                              arrears_brought_forward: prevBalance > 0 ? prevBalance.toString() : '0'
+                              // Preserve negative balances (overpayments) as negative strings
+                              arrears_brought_forward: prevBalance !== undefined && prevBalance !== null ? prevBalance.toString() : '0'
                             }))
                           })
                       }
@@ -2012,11 +2014,10 @@ export default function Billing() {
                           .eq('billing_month', prevMonthStr)
                           .single()
 
-                        if (prevBill && prevBill.balance > 0) {
-                          newFormData.arrears_brought_forward = prevBill.balance.toString()
-                        } else {
-                          newFormData.arrears_brought_forward = '0'
-                        }
+                        // Preserve negative balances (overpayment) as negative arrears when present
+                        newFormData.arrears_brought_forward = prevBill && typeof prevBill.balance !== 'undefined' && prevBill.balance !== null
+                          ? prevBill.balance.toString()
+                          : '0'
 
                         // Auto-fill utility amounts from active utility types ONLY
                         // Reset utility amounts first
