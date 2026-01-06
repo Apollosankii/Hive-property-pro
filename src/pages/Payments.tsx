@@ -11,6 +11,10 @@ export default function Payments() {
   const [billId, setBillId] = useState('')
   const [filterType, setFilterType] = useState<'unit' | 'tenant'>('unit')
   const [selectedEntityId, setSelectedEntityId] = useState('')
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  })
   const [unitsList, setUnitsList] = useState<any[]>([])
   const [tenantsList, setTenantsList] = useState<any[]>([])
   const [amount, setAmount] = useState('')
@@ -100,7 +104,7 @@ export default function Payments() {
   
 
   const { data: payments, error: paymentsError, isLoading: paymentsLoading } = useQuery({
-    queryKey: ['payments'],
+    queryKey: ['payments', selectedMonth],
     queryFn: async () => {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) {
@@ -108,11 +112,26 @@ export default function Payments() {
       }
 
       // Fetch payments first
+      // compute month range (start inclusive, nextMonth exclusive)
+      const parts = selectedMonth.split('-').map(Number)
+      const py = parts[0]
+      const pm = parts[1]
+      let ny = py
+      let nm = pm + 1
+      if (nm > 12) {
+        nm = 1
+        ny = py + 1
+      }
+      const startDate = `${py}-${String(pm).padStart(2, '0')}-01`
+      const nextMonthFirst = `${ny}-${String(nm).padStart(2, '0')}-01`
+
       const { data: paymentsData, error: paymentsError } = await supabase
         .from('payments')
         .select('*')
+        .gte('payment_date', startDate)
+        .lt('payment_date', nextMonthFirst)
         .order('payment_date', { ascending: false })
-        .limit(50)
+        .limit(500)
       
       if (paymentsError) {
         console.error('Payments query error:', paymentsError)
@@ -224,14 +243,28 @@ export default function Payments() {
   })
 
   const { data: paymentsByEntity, isLoading: _paymentsByEntityLoading } = useQuery({
-    queryKey: ['payments-by-entity', filterType, selectedEntityId],
+    queryKey: ['payments-by-entity', filterType, selectedEntityId, selectedMonth],
     enabled: !!selectedEntityId,
     queryFn: async () => {
       const field = filterType === 'unit' ? 'unit_id' : 'tenant_id'
+      const parts = selectedMonth.split('-').map(Number)
+      const py = parts[0]
+      const pm = parts[1]
+      let ny = py
+      let nm = pm + 1
+      if (nm > 12) {
+        nm = 1
+        ny = py + 1
+      }
+      const startDate = `${py}-${String(pm).padStart(2, '0')}-01`
+      const nextMonthFirst = `${ny}-${String(nm).padStart(2, '0')}-01`
+
       const { data: paymentsData, error } = await supabase
         .from('payments')
         .select('*')
         .eq(field, selectedEntityId)
+        .gte('payment_date', startDate)
+        .lt('payment_date', nextMonthFirst)
         .order('payment_date', { ascending: false })
       if (error) throw error
 
@@ -309,18 +342,40 @@ export default function Payments() {
       // Update bill - only update amount_paid, balance is generated automatically
       const newAmountPaid = (bill.amount_paid || 0) + paymentData.amount!
       // Balance will be recalculated automatically: total_amount - newAmountPaid
-      const newStatus =
-        (bill.total_amount - newAmountPaid) <= 0 ? 'paid' : newAmountPaid > 0 ? 'partial' : 'pending'
-
       const { error: billError } = await supabase
         .from('bills')
         .update({
           amount_paid: newAmountPaid,
-          status: newStatus,
         })
         .eq('id', billId)
 
       if (billError) throw billError
+
+      // Re-read latest bill values from DB to avoid stale/calc differences
+      const { data: freshBill, error: freshError } = await supabase
+        .from('bills')
+        .select('total_amount, amount_paid, balance, status')
+        .eq('id', billId)
+        .single()
+
+      if (freshError) {
+        console.warn('Failed to fetch fresh bill after payment:', freshError)
+      } else {
+        const total = freshBill.total_amount || 0
+        const paid = freshBill.amount_paid || 0
+        const balance = typeof freshBill.balance === 'number' ? freshBill.balance : (total - paid)
+        const EPS = 0.0001
+        const computedStatus = balance <= EPS ? 'paid' : paid > 0 ? 'partial' : 'pending'
+
+        if (computedStatus !== freshBill.status) {
+          const { error: statusErr } = await supabase
+            .from('bills')
+            .update({ status: computedStatus })
+            .eq('id', billId)
+
+          if (statusErr) console.warn('Failed to sync bill status:', statusErr)
+        }
+      }
 
       return payment
     },
@@ -400,16 +455,25 @@ export default function Payments() {
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">Track and record payment transactions</p>
         </div>
-        <button
-          onClick={() => {
-            setIsModalOpen(true)
-            resetForm()
-          }}
-          className="btn btn-primary"
-        >
-          <Plus size={20} />
-          Record Payment
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            type="month"
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            className="input"
+            title="Filter payments by month"
+          />
+          <button
+            onClick={() => {
+              setIsModalOpen(true)
+              resetForm()
+            }}
+            className="btn btn-primary"
+          >
+            <Plus size={20} />
+            Record Payment
+          </button>
+        </div>
       </div>
 
       <div className="card overflow-x-auto w-full">

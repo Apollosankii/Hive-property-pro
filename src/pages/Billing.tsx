@@ -8,9 +8,10 @@ import { importBillsFromFile } from '@/lib/excel-import'
 import { Plus, Calendar, CheckCircle, Receipt, Edit, FileText, AlertCircle, X, Printer, FileSpreadsheet, Upload } from 'lucide-react'
 
 export default function Billing() {
-  const [selectedMonth, setSelectedMonth] = useState(
-    new Date().toISOString().slice(0, 7)
-  )
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  })
   const [isGenerating, setIsGenerating] = useState(false)
   const [showMeterModal, setShowMeterModal] = useState(false)
   const [showEditBillModal, setShowEditBillModal] = useState(false)
@@ -53,6 +54,39 @@ export default function Billing() {
   const [importResult, setImportResult] = useState<{ success: number; errors: string[] } | null>(null)
   const queryClient = useQueryClient()
 
+  // Helper: sync the bill status using fresh DB-calculated values
+  const syncBillStatus = async (billId: string) => {
+    try {
+      const { data: freshBill, error: freshError } = await supabase
+        .from('bills')
+        .select('total_amount, amount_paid, balance, status')
+        .eq('id', billId)
+        .single()
+
+      if (freshError) {
+        console.warn('Failed to fetch fresh bill for status sync:', freshError)
+        return
+      }
+
+      const total = freshBill.total_amount || 0
+      const paid = freshBill.amount_paid || 0
+      const balance = typeof freshBill.balance === 'number' ? freshBill.balance : (total - paid)
+      const EPS = 0.0001
+      const computedStatus = balance <= EPS ? 'paid' : paid > 0 ? 'partial' : 'pending'
+
+      if (computedStatus !== freshBill.status) {
+        const { error: statusErr } = await supabase
+          .from('bills')
+          .update({ status: computedStatus })
+          .eq('id', billId)
+
+        if (statusErr) console.warn('Failed to sync bill status:', statusErr)
+      }
+    } catch (err) {
+      console.warn('syncBillStatus error', err)
+    }
+  }
+
   // Get settings for default rates
   const { data: settings } = useQuery({
     queryKey: ['settings'],
@@ -74,9 +108,14 @@ export default function Billing() {
       }
 
       const monthStart = selectedMonth + '-01'
-      const nextMonth = new Date(monthStart)
-      nextMonth.setMonth(nextMonth.getMonth() + 1)
-      const monthEnd = nextMonth.toISOString().slice(0, 10)
+      const monthParts = selectedMonth.split('-').map(Number)
+      let ny = monthParts[0]
+      let nm = monthParts[1] + 1
+      if (nm > 12) {
+        nm = 1
+        ny += 1
+      }
+      const monthEnd = `${ny}-${String(nm).padStart(2, '0')}-01`
 
       // Fetch bills first
       const { data: billsData, error: billsError } = await supabase
@@ -286,9 +325,14 @@ export default function Billing() {
       // 3. Sets that balance as arrears_brought_forward for the new month's bills
       // Example: If January bill was 10,000 and only 9,000 was paid, 
       //          the remaining 1,000 automatically becomes arrears in February's bill.
-      const prevMonth = new Date(selectedMonth + '-01')
-      prevMonth.setMonth(prevMonth.getMonth() - 1)
-      const prevMonthStr = prevMonth.toISOString().slice(0, 7) + '-01'
+      const parts = selectedMonth.split('-').map(Number)
+      let py = parts[0]
+      let pm = parts[1] - 1
+      if (pm < 1) {
+        pm = 12
+        py -= 1
+      }
+      const prevMonthStr = `${py}-${String(pm).padStart(2, '0')}-01`
 
       console.log('Calculating arrears from previous month:', prevMonthStr)
 
@@ -443,6 +487,17 @@ export default function Billing() {
           }
         }
       }
+
+        // Sync status for inserted bills using DB values (protects against client-side rounding/logic differences)
+        if (insertedBills && insertedBills.length > 0) {
+          for (const b of insertedBills) {
+            try {
+              await syncBillStatus(b.id)
+            } catch (err) {
+              console.warn('Failed to sync generated bill status for', b.id, err)
+            }
+          }
+        }
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['bills'] })
@@ -522,6 +577,7 @@ export default function Billing() {
         .eq('id', id)
       
       if (error) throw error
+      await syncBillStatus(id)
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['bills'] })
@@ -556,11 +612,14 @@ export default function Billing() {
   // Create single bill mutation
   const createBillMutation = useMutation({
     mutationFn: async (billData: any) => {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('bills')
         .insert([billData])
+        .select()
+        .single()
       
       if (error) throw error
+      if (data?.id) await syncBillStatus(data.id)
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['bills'] })
@@ -595,11 +654,14 @@ export default function Billing() {
   // Create utility-only bill mutation
   const createUtilityBillMutation = useMutation({
     mutationFn: async (billData: any) => {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('bills')
         .insert([billData])
+        .select()
+        .single()
       
       if (error) throw error
+      if (data?.id) await syncBillStatus(data.id)
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['bills'] })
@@ -854,6 +916,13 @@ export default function Billing() {
     if (insertError) {
       setError(insertError.message || 'Failed to create bill')
       return
+    }
+
+    // Ensure status is synced using DB-calculated values (in case generated columns change status)
+    try {
+      if (insertedBill?.id) await syncBillStatus(insertedBill.id)
+    } catch (err) {
+      console.warn('Failed to sync status for newly created bill:', err)
     }
 
     // Create utility_bill_items for the bill
