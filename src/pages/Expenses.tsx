@@ -16,6 +16,7 @@ export default function Expenses() {
   const [unitId, setUnitId] = useState('')
   const [notes, setNotes] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7))
   const queryClient = useQueryClient()
 
   const { data: buildings } = useQuery({
@@ -176,6 +177,14 @@ export default function Expenses() {
 
   const totalExpenses = expenses?.reduce((sum, e) => sum + (e.amount || 0), 0) || 0
 
+  // Filter expenses by selected month
+  const filteredExpenses = expenses?.filter(expense => {
+    const expenseMonth = expense.expense_date.slice(0, 7)
+    return expenseMonth === selectedMonth
+  }) || []
+
+  const filteredTotal = filteredExpenses.reduce((sum, e) => sum + (e.amount || 0), 0) || 0
+
   if (expensesLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -194,7 +203,10 @@ export default function Expenses() {
           <h1 className="text-4xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 dark:from-zinc-50 dark:to-zinc-200 bg-clip-text text-transparent">
             Expenses
           </h1>
-          <p className="text-slate-600 dark:text-zinc-400 mt-1">Total: {formatCurrency(totalExpenses)}</p>
+          <p className="text-slate-600 dark:text-zinc-400 mt-1">
+            {selectedMonth && `${new Date(selectedMonth + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}: `}
+            {formatCurrency(filteredTotal)}
+          </p>
         </div>
         <button
           onClick={() => handleOpenModal()}
@@ -205,7 +217,22 @@ export default function Expenses() {
         </button>
       </div>
 
-      {expenses && expenses.length > 0 ? (
+      {/* Monthly Filter */}
+      <div className="card">
+        <div className="flex items-center gap-4">
+          <label className="text-sm font-semibold text-slate-700 dark:text-zinc-200">
+            Filter by Month:
+          </label>
+          <input
+            type="month"
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            className="input w-32"
+          />
+        </div>
+      </div>
+
+      {expenses && filteredExpenses.length > 0 ? (
         <div className="card">
           <div className="overflow-x-auto">
             <table className="table">
@@ -221,7 +248,7 @@ export default function Expenses() {
                 </tr>
               </thead>
               <tbody>
-                {expenses.map((expense: any) => (
+                {filteredExpenses.map((expense: any) => (
                   <tr key={expense.id}>
                     <td>{formatDate(expense.expense_date)}</td>
                     <td className="font-medium">{expense.description}</td>
@@ -264,7 +291,12 @@ export default function Expenses() {
       ) : (
         <div className="card text-center py-12">
           <Wallet className="mx-auto text-slate-400 dark:text-zinc-600 mb-4" size={48} />
-          <p className="text-slate-600 dark:text-zinc-400 mb-4">No expenses recorded yet</p>
+          <p className="text-slate-600 dark:text-zinc-400 mb-4">
+            {expenses && expenses.length > 0 
+              ? `No expenses for ${new Date(selectedMonth + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`
+              : 'No expenses recorded yet'
+            }
+          </p>
           <button onClick={() => handleOpenModal()} className="btn btn-primary">
             <Plus size={20} className="mr-2" />
             Add First Expense
