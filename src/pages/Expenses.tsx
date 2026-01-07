@@ -175,8 +175,6 @@ export default function Expenses() {
     }
   }
 
-  const totalExpenses = expenses?.reduce((sum, e) => sum + (e.amount || 0), 0) || 0
-
   // Filter expenses by selected month
   const filteredExpenses = expenses?.filter(expense => {
     const expenseMonth = expense.expense_date.slice(0, 7)
