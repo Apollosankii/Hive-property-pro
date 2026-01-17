@@ -5,6 +5,7 @@ import { formatCurrency, formatMonth } from '@/lib/utils'
 import { generateInvoicePDF, generateBulkInvoicesPDF } from '@/lib/pdf'
 import { exportBillsToExcel } from '@/lib/excel'
 import { importBillsFromFile } from '@/lib/excel-import'
+import ExportColumnsModal from '@/components/ExportColumnsModal'
 import { Plus, Calendar, CheckCircle, Receipt, Edit, FileText, AlertCircle, X, Printer, FileSpreadsheet, Upload } from 'lucide-react'
 
 export default function Billing() {
@@ -52,6 +53,8 @@ export default function Billing() {
   const [importProgress, setImportProgress] = useState(0)
   const [importMessage, setImportMessage] = useState('')
   const [importResult, setImportResult] = useState<{ success: number; errors: string[] } | null>(null)
+  const [showExportModal, setShowExportModal] = useState(false)
+  const [exportBillsToUse, setExportBillsToUse] = useState<any[]>([])
   const queryClient = useQueryClient()
 
   // Helper: sync the bill status using fresh DB-calculated values
@@ -1066,9 +1069,18 @@ export default function Billing() {
       setError('No bills to export')
       return
     }
+    setExportBillsToUse(bills)
+    setShowExportModal(true)
+  }
+
+  const handleExportWithSelectedColumns = (selectedColumns: string[]) => {
+    if (!exportBillsToUse || exportBillsToUse.length === 0) {
+      setError('No bills to export')
+      return
+    }
     try {
       const monthName = formatMonth(selectedMonth).replace(/\s+/g, '-')
-      exportBillsToExcel(bills, `bills-${monthName}`)
+      exportBillsToExcel(exportBillsToUse, `bills-${monthName}`, selectedColumns)
     } catch (error) {
       console.error('Error exporting to Excel:', error)
       setError('Failed to export to Excel. Please try again.')
@@ -2468,6 +2480,43 @@ export default function Billing() {
           </div>
         </div>
       )}
+
+      {/* Export Columns Modal */}
+      <ExportColumnsModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        onExport={handleExportWithSelectedColumns}
+        availableColumns={Object.keys({
+          'Invoice #': '',
+          'Billing Month': '',
+          'Unit Number': '',
+          'Building Name': '',
+          'Tenant Name': '',
+          'Tenant Phone': '',
+          'Water Previous Reading': '',
+          'Water Current Reading': '',
+          'Water Units Consumed': '',
+          'Water Rate (per unit)': '',
+          'Water Amount': '',
+          'Electricity Previous Reading': '',
+          'Electricity Current Reading': '',
+          'Electricity Units Consumed': '',
+          'Electricity Rate (per unit)': '',
+          'Electricity Amount': '',
+          'Monthly Rent': '',
+          'Garbage Amount': '',
+          'Maintenance Amount': '',
+          'Other Utilities Amount': '',
+          'Total Utilities': '',
+          'Arrears Brought Forward': '',
+          'Total Amount': '',
+          'Amount Paid': '',
+          'Balance': '',
+          'Status': '',
+          'Created Date': '',
+          'Updated Date': '',
+        }).map(col => ({ id: col, label: col, category: '' }))}
+      />
     </div>
   )
 }

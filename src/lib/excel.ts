@@ -29,115 +29,110 @@ export function exportToExcel(data: any[], filename: string = 'export') {
   XLSX.writeFile(workbook, `${filename}-${new Date().toISOString().split('T')[0]}.xlsx`)
 }
 
+// Define all available columns for bills
+const ALL_BILL_COLUMNS = {
+  'Invoice #': (bill: any) => bill.id.slice(0, 8).toUpperCase(),
+  'Billing Month': (bill: any) => new Date(bill.billing_month).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+  'Unit Number': (bill: any) => bill.units?.unit_number || 'N/A',
+  'Building Name': (bill: any) => bill.units?.buildings?.name || 'N/A',
+  'Tenant Name': (bill: any) => bill.tenants?.name || 'N/A',
+  'Tenant Phone': (bill: any) => bill.tenants?.phone || 'N/A',
+  'Water Previous Reading': (bill: any) => bill.water_prev_reading || 0,
+  'Water Current Reading': (bill: any) => bill.water_current_reading || 0,
+  'Water Units Consumed': (bill: any) => bill.water_units_consumed || 0,
+  'Water Rate (per unit)': (bill: any) => bill.water_rate || 0,
+  'Water Amount': (bill: any) => bill.water_amount || 0,
+  'Electricity Previous Reading': (bill: any) => bill.elec_prev_reading || 0,
+  'Electricity Current Reading': (bill: any) => bill.elec_current_reading || 0,
+  'Electricity Units Consumed': (bill: any) => bill.elec_units_consumed || 0,
+  'Electricity Rate (per unit)': (bill: any) => bill.elec_rate || 0,
+  'Electricity Amount': (bill: any) => bill.elec_amount || 0,
+  'Monthly Rent': (bill: any) => bill.rent_amount || 0,
+  'Garbage Amount': (bill: any) => bill.garbage_amount || 0,
+  'Maintenance Amount': (bill: any) => bill.maintenance_amount || 0,
+  'Other Utilities Amount': (bill: any) => bill.other_utilities_amount || 0,
+  'Total Utilities': (bill: any) => (bill.garbage_amount || 0) + (bill.maintenance_amount || 0) + (bill.other_utilities_amount || 0),
+  'Arrears Brought Forward': (bill: any) => bill.arrears_brought_forward || 0,
+  'Total Amount': (bill: any) => bill.total_amount || 0,
+  'Amount Paid': (bill: any) => bill.amount_paid || 0,
+  'Balance': (bill: any) => bill.balance || 0,
+  'Status': (bill: any) => bill.status || 'pending',
+  'Created Date': (bill: any) => new Date(bill.created_at).toLocaleDateString('en-US'),
+  'Updated Date': (bill: any) => bill.updated_at ? new Date(bill.updated_at).toLocaleDateString('en-US') : 'N/A',
+}
+
 // Export bills to Excel with detailed structure
-export function exportBillsToExcel(bills: any[], filename: string = 'bills-export') {
+export function exportBillsToExcel(bills: any[], filename: string = 'bills-export', selectedColumns?: string[]) {
   if (!bills || bills.length === 0) {
     console.warn('No bills to export')
     return
   }
 
+  // Use all columns if none selected, otherwise use only selected columns
+  const columnsToUse = selectedColumns && selectedColumns.length > 0 ? selectedColumns : Object.keys(ALL_BILL_COLUMNS)
+  
   // Transform bills data to Excel format with clearly defined columns
   const excelData = bills.map((bill) => {
-    const totalUtilities = (bill.garbage_amount || 0) + (bill.maintenance_amount || 0) + (bill.other_utilities_amount || 0)
-    
-    return {
-      'Invoice #': bill.id.slice(0, 8).toUpperCase(),
-      'Billing Month': new Date(bill.billing_month).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
-      'Unit Number': bill.units?.unit_number || 'N/A',
-      'Building Name': bill.units?.buildings?.name || 'N/A',
-      'Tenant Name': bill.tenants?.name || 'N/A',
-      'Tenant Phone': bill.tenants?.phone || 'N/A',
-      
-      // Water Details
-      'Water Previous Reading': bill.water_prev_reading || 0,
-      'Water Current Reading': bill.water_current_reading || 0,
-      'Water Units Consumed': bill.water_units_consumed || 0,
-      'Water Rate (per unit)': bill.water_rate || 0,
-      'Water Amount': bill.water_amount || 0,
-      
-      // Electricity Details
-      'Electricity Previous Reading': bill.elec_prev_reading || 0,
-      'Electricity Current Reading': bill.elec_current_reading || 0,
-      'Electricity Units Consumed': bill.elec_units_consumed || 0,
-      'Electricity Rate (per unit)': bill.elec_rate || 0,
-      'Electricity Amount': bill.elec_amount || 0,
-      
-      // Rent and Utilities
-      'Monthly Rent': bill.rent_amount || 0,
-      'Garbage Amount': bill.garbage_amount || 0,
-      'Maintenance Amount': bill.maintenance_amount || 0,
-      'Other Utilities Amount': bill.other_utilities_amount || 0,
-      'Total Utilities': totalUtilities,
-      
-      // Financial Summary
-      'Arrears Brought Forward': bill.arrears_brought_forward || 0,
-      'Total Amount': bill.total_amount || 0,
-      'Amount Paid': bill.amount_paid || 0,
-      'Balance': bill.balance || 0,
-      'Status': bill.status || 'pending',
-      
-      // Dates
-      'Created Date': new Date(bill.created_at).toLocaleDateString('en-US'),
-      'Updated Date': bill.updated_at ? new Date(bill.updated_at).toLocaleDateString('en-US') : 'N/A',
-    }
+    const row: any = {}
+    columnsToUse.forEach(columnName => {
+      const columnFn = ALL_BILL_COLUMNS[columnName as keyof typeof ALL_BILL_COLUMNS]
+      if (columnFn) {
+        row[columnName] = columnFn(bill)
+      }
+    })
+    return row
   })
 
   const worksheet = XLSX.utils.json_to_sheet(excelData)
   const workbook = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Bills')
   
-  // Define column widths optimized to fit on one page laterally
-  // Landscape A4: ~11.7" width, with margins ~10.7" usable = ~75-80 character units max
-  // Total target: ~75 character units to ensure fit with scaling
-  const columnWidths = [
-    { wch: 8 },  // Invoice # (reduced from 10)
-    { wch: 12 }, // Billing Month (reduced from 15)
-    { wch: 8 },  // Unit Number (reduced from 10)
-    { wch: 14 }, // Building Name (reduced from 18)
-    { wch: 14 }, // Tenant Name (reduced from 18)
-    { wch: 11 }, // Tenant Phone (reduced from 13)
-    
-    // Water columns (reduced widths)
-    { wch: 14 }, // Water Previous Reading (reduced from 18)
-    { wch: 14 }, // Water Current Reading (reduced from 18)
-    { wch: 12 }, // Water Units Consumed (reduced from 16)
-    { wch: 11 }, // Water Rate (reduced from 14)
-    { wch: 10 }, // Water Amount (reduced from 12)
-    
-    // Electricity columns (reduced widths)
-    { wch: 15 }, // Electricity Previous Reading (reduced from 20)
-    { wch: 15 }, // Electricity Current Reading (reduced from 20)
-    { wch: 13 }, // Electricity Units Consumed (reduced from 18)
-    { wch: 12 }, // Electricity Rate (reduced from 16)
-    { wch: 11 }, // Electricity Amount (reduced from 14)
-    
-    // Rent and Utilities (reduced widths)
-    { wch: 10 }, // Monthly Rent (reduced from 12)
-    { wch: 10 }, // Garbage Amount (reduced from 13)
-    { wch: 11 }, // Maintenance Amount (reduced from 15)
-    { wch: 14 }, // Other Utilities Amount (reduced from 18)
-    { wch: 10 }, // Total Utilities (reduced from 13)
-    
-    // Financial Summary (reduced widths)
-    { wch: 14 }, // Arrears Brought Forward (reduced from 18)
-    { wch: 10 }, // Total Amount (reduced from 12)
-    { wch: 10 }, // Amount Paid (reduced from 12)
-    { wch: 10 }, // Balance (reduced from 12)
-    { wch: 8 },  // Status (reduced from 10)
-    
-    // Dates (reduced widths)
-    { wch: 10 }, // Created Date (reduced from 12)
-    { wch: 10 }, // Updated Date (reduced from 12)
-  ]
+  // Map column names to their default widths
+  const columnWidthMap: Record<string, number> = {
+    'Invoice #': 8,
+    'Billing Month': 12,
+    'Unit Number': 8,
+    'Building Name': 14,
+    'Tenant Name': 14,
+    'Tenant Phone': 11,
+    'Water Previous Reading': 14,
+    'Water Current Reading': 14,
+    'Water Units Consumed': 12,
+    'Water Rate (per unit)': 11,
+    'Water Amount': 10,
+    'Electricity Previous Reading': 15,
+    'Electricity Current Reading': 15,
+    'Electricity Units Consumed': 13,
+    'Electricity Rate (per unit)': 12,
+    'Electricity Amount': 11,
+    'Monthly Rent': 10,
+    'Garbage Amount': 10,
+    'Maintenance Amount': 11,
+    'Other Utilities Amount': 14,
+    'Total Utilities': 10,
+    'Arrears Brought Forward': 14,
+    'Total Amount': 10,
+    'Amount Paid': 10,
+    'Balance': 10,
+    'Status': 8,
+    'Created Date': 10,
+    'Updated Date': 10,
+  }
+
+  // Generate column widths based on selected columns
+  const columnWidths = columnsToUse.map(columnName => ({
+    wch: columnWidthMap[columnName] || 12
+  }))
   
   // Calculate total width
   const totalWidth = columnWidths.reduce((sum, col) => sum + col.wch, 0)
-  console.log(`Total column width: ${totalWidth} character units`)
+  console.log(`Total column width: ${totalWidth} character units for ${columnsToUse.length} columns`)
   
   worksheet['!cols'] = columnWidths
   
   // Configure page setup to fit on one page laterally (horizontally)
-  // Using narrow margins and landscape orientation
+  // Using narrow margins and landscape orientation if many columns, portrait if few
+  const isLandscape = columnsToUse.length > 10
   worksheet['!margins'] = {
     left: 0.25,   // Narrow margin
     right: 0.25,  // Narrow margin
@@ -147,11 +142,11 @@ export function exportBillsToExcel(bills: any[], filename: string = 'bills-expor
     footer: 0.3,
   }
   
-  // Page setup for landscape A4 - fit to 1 page wide
+  // Page setup for A4 - fit to 1 page wide
   worksheet['!pageSetup'] = {
     fitToWidth: 1,        // Fit to 1 page wide (most important)
     fitToHeight: 0,       // No height limit (use as many pages as needed)
-    orientation: 'landscape', // Landscape orientation
+    orientation: isLandscape ? 'landscape' : 'portrait',
     paperSize: 9,         // A4 paper size
     scale: 100,           // Start with 100% scale, Excel will auto-adjust if needed
     horizontalDpi: 200,
