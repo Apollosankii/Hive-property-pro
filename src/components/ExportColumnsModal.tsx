@@ -117,15 +117,15 @@ export default function ExportColumnsModal({ isOpen, onClose, onExport, availabl
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+      <div className="bg-white dark:bg-slate-900 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         {/* Header */}
-        <div className="sticky top-0 bg-white border-b border-gray-200 p-4 sm:p-6 flex items-center justify-between">
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Select Columns to Export</h2>
+        <div className="sticky top-0 bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-700 p-4 sm:p-6 flex items-center justify-between">
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-slate-100">Select Columns to Export</h2>
           <button
             onClick={onClose}
-            className="p-1 hover:bg-gray-100 rounded-lg transition"
+            className="p-1 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition"
           >
-            <X size={24} className="text-gray-600" />
+            <X size={24} className="text-gray-600 dark:text-slate-400" />
           </button>
         </div>
 
@@ -135,17 +135,17 @@ export default function ExportColumnsModal({ isOpen, onClose, onExport, availabl
           <div className="flex gap-2 mb-6">
             <button
               onClick={selectAll}
-              className="px-3 py-2 sm:px-4 text-sm font-medium bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition"
+              className="px-3 py-2 sm:px-4 text-sm font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition"
             >
               Select All
             </button>
             <button
               onClick={deselectAll}
-              className="px-3 py-2 sm:px-4 text-sm font-medium bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition"
+              className="px-3 py-2 sm:px-4 text-sm font-medium bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 rounded-lg hover:bg-gray-200 dark:hover:bg-slate-700 transition"
             >
               Deselect All
             </button>
-            <div className="flex-1 text-right text-sm text-gray-600">
+            <div className="flex-1 text-right text-sm text-gray-600 dark:text-slate-400">
               {selectedColumns.size} selected
             </div>
           </div>
@@ -159,11 +159,11 @@ export default function ExportColumnsModal({ isOpen, onClose, onExport, availabl
               const isExpanded = expandedCategories.has(category)
 
               return (
-                <div key={category} className="border border-gray-200 rounded-lg overflow-hidden">
+                <div key={category} className="border border-gray-200 dark:border-slate-700 rounded-lg overflow-hidden">
                   {/* Category Header */}
                   <button
                     onClick={() => toggleCategory(category)}
-                    className="w-full px-4 py-3 sm:py-4 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition"
+                    className="w-full px-4 py-3 sm:py-4 flex items-center justify-between bg-gray-50 dark:bg-slate-800 hover:bg-gray-100 dark:hover:bg-slate-700 transition"
                   >
                     <div className="flex items-center gap-3">
                       <input
@@ -171,36 +171,36 @@ export default function ExportColumnsModal({ isOpen, onClose, onExport, availabl
                         checked={allSelected}
                         onChange={() => toggleCategoryAll(category)}
                         onClick={(e) => e.stopPropagation()}
-                        className="w-4 h-4 rounded cursor-pointer"
+                        className="w-4 h-4 rounded cursor-pointer accent-blue-600 dark:accent-blue-500"
                       />
-                      <span className="font-semibold text-gray-900">{category}</span>
+                      <span className="font-semibold text-gray-900 dark:text-slate-100">{category}</span>
                       {someSelected && !allSelected && (
-                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
+                        <span className="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-2 py-1 rounded">
                           {categoryColumnIds.filter(id => selectedColumns.has(id)).length}/{categoryColumnIds.length}
                         </span>
                       )}
                     </div>
                     <ChevronDown
                       size={20}
-                      className={`text-gray-600 transition ${isExpanded ? 'rotate-180' : ''}`}
+                      className={`text-gray-600 dark:text-slate-400 transition ${isExpanded ? 'rotate-180' : ''}`}
                     />
                   </button>
 
                   {/* Category Items */}
                   {isExpanded && (
-                    <div className="bg-white border-t border-gray-200 p-4 space-y-3">
+                    <div className="bg-white dark:bg-slate-900 border-t border-gray-200 dark:border-slate-700 p-4 space-y-3">
                       {columns.map((column) => (
                         <label
                           key={column.id}
-                          className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-2 rounded transition"
+                          className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 p-2 rounded transition"
                         >
                           <input
                             type="checkbox"
                             checked={selectedColumns.has(column.id)}
                             onChange={() => toggleColumn(column.id)}
-                            className="w-4 h-4 rounded cursor-pointer"
+                            className="w-4 h-4 rounded cursor-pointer accent-blue-600 dark:accent-blue-500"
                           />
-                          <span className="text-gray-700">{column.label}</span>
+                          <span className="text-gray-700 dark:text-slate-300">{column.label}</span>
                         </label>
                       ))}
                     </div>
@@ -212,17 +212,17 @@ export default function ExportColumnsModal({ isOpen, onClose, onExport, availabl
         </div>
 
         {/* Footer */}
-        <div className="sticky bottom-0 bg-white border-t border-gray-200 p-4 sm:p-6 flex gap-3 justify-end">
+        <div className="sticky bottom-0 bg-white dark:bg-slate-900 border-t border-gray-200 dark:border-slate-700 p-4 sm:p-6 flex gap-3 justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition"
+            className="px-4 py-2 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-slate-300 font-medium hover:bg-gray-50 dark:hover:bg-slate-800 transition"
           >
             Cancel
           </button>
           <button
             onClick={handleExport}
             disabled={selectedColumns.size === 0}
-            className="px-6 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-6 py-2 rounded-lg bg-blue-600 dark:bg-blue-700 text-white font-medium hover:bg-blue-700 dark:hover:bg-blue-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Export to Excel
           </button>
