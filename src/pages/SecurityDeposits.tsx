@@ -2,7 +2,23 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, SecurityDeposit } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Shield, AlertCircle, X, FileText, Loader } from 'lucide-react'
+import { Shield, AlertCircle, X, FileText, Loader, Download, Printer } from 'lucide-react'
+
+interface SettlementReceipt {
+  tenantName: string
+  tenantPhone: string
+  unitNumber: string
+  buildingName: string
+  leaseEndDate: string
+  depositAmount: number
+  existingDeductions: number
+  arrears: number
+  damages: number
+  totalDeductions: number
+  refundAmount: number
+  damagesDescription: string
+  settlementNotes: string
+}
 
 export default function SecurityDeposits() {
   const [selectedDeposit, setSelectedDeposit] = useState<SecurityDeposit | null>(null)
@@ -13,6 +29,8 @@ export default function SecurityDeposits() {
   const [search, setSearch] = useState('')
   const [leaseEndTenantBills, setLeaseEndTenantBills] = useState<any[]>([])
   const [loadingBills, setLoadingBills] = useState(false)
+  const [showReceiptModal, setShowReceiptModal] = useState(false)
+  const [settlementReceipt, setSettlementReceipt] = useState<SettlementReceipt | null>(null)
   const queryClient = useQueryClient()
 
   const { data: deposits, error: depositsError, isLoading: depositsLoading } = useQuery({
@@ -255,12 +273,38 @@ export default function SecurityDeposits() {
       await queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
       await queryClient.invalidateQueries({ queryKey: ['refunds-report'] })
       await queryClient.invalidateQueries({ queryKey: ['financial-summary'] })
+      
+      // Generate receipt data
+      const totalBalance = leaseEndTenantBills.reduce((sum: number, bill: any) => sum + (bill.balance || 0), 0)
+      const depositAmount = selectedDeposit.amount || 0
+      const existingDeductions = selectedDeposit.total_deductions || 0
+      const newDamagesAmount = parseFloat(damagesAmount) || 0
+      const arrearsTodeduct = Math.max(0, totalBalance)
+      const totalDeductions = existingDeductions + arrearsTodeduct + newDamagesAmount
+      const refundAmount = depositAmount - totalDeductions - Math.min(0, totalBalance)
+      
+      setSettlementReceipt({
+        tenantName: selectedDeposit.tenants?.name || 'N/A',
+        tenantPhone: selectedDeposit.tenants?.phone || 'N/A',
+        unitNumber: selectedDeposit.units?.unit_number || 'N/A',
+        buildingName: selectedDeposit.units?.buildings?.name || 'N/A',
+        leaseEndDate: new Date().toISOString().split('T')[0],
+        depositAmount,
+        existingDeductions,
+        arrears: arrearsTodeduct,
+        damages: newDamagesAmount,
+        totalDeductions,
+        refundAmount,
+        damagesDescription,
+        settlementNotes: `Lease ended. ${damagesDescription || 'No additional notes.'}`
+      })
+      
       setShowLeaseEndModal(false)
+      setShowReceiptModal(true)
       setSelectedDeposit(null)
       setDamagesAmount('')
       setDamagesDescription('')
       setError(null)
-      alert('Lease end processed successfully! Tenant archived and unit marked as vacant.')
     },
     onError: (error: any) => {
       console.error('Failed to process lease end:', error)
@@ -303,6 +347,297 @@ export default function SecurityDeposits() {
       damagesAmount: parseFloat(damagesAmount) || 0,
       damagesDescription: damagesDescription
     })
+  }
+
+  const generateReceiptHTML = (receipt: SettlementReceipt): string => {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Lease End Settlement Receipt</title>
+        <style>
+          * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+          }
+          body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 40px;
+            background-color: #f5f5f5;
+          }
+          .receipt-container {
+            max-width: 900px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+          }
+          .header {
+            text-align: center;
+            margin-bottom: 30px;
+            border-bottom: 3px solid #1e40af;
+            padding-bottom: 20px;
+          }
+          .header h1 {
+            color: #1e40af;
+            font-size: 28px;
+            margin-bottom: 5px;
+          }
+          .header p {
+            color: #64748b;
+            font-size: 14px;
+            margin-bottom: 3px;
+          }
+          .section {
+            margin-bottom: 25px;
+          }
+          .section-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: #1e40af;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #e2e8f0;
+          }
+          .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #f1f5f9;
+          }
+          .info-row:last-child {
+            border-bottom: none;
+          }
+          .label {
+            color: #475569;
+            font-weight: 500;
+            font-size: 13px;
+          }
+          .value {
+            color: #1e293b;
+            font-weight: 600;
+            font-size: 13px;
+            text-align: right;
+          }
+          .settlement-box {
+            background-color: #f0f9ff;
+            border: 2px solid #1e40af;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+          }
+          .settlement-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            font-size: 14px;
+          }
+          .settlement-total {
+            display: flex;
+            justify-content: space-between;
+            padding: 15px 0;
+            border-top: 2px solid #1e40af;
+            border-bottom: 2px solid #1e40af;
+            font-size: 16px;
+            font-weight: 700;
+            color: #1e40af;
+            margin: 15px 0;
+          }
+          .refund-amount {
+            display: flex;
+            justify-content: space-between;
+            padding: 15px 0;
+            font-size: 18px;
+            font-weight: 700;
+            color: #059669;
+            background-color: #f0fdf4;
+            padding: 15px;
+            border-radius: 6px;
+          }
+          .deductions-breakdown {
+            background-color: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 15px 0;
+            font-size: 13px;
+          }
+          .deduction-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+          }
+          .deduction-item .label {
+            color: #92400e;
+          }
+          .deduction-item .value {
+            color: #b45309;
+          }
+          .notes {
+            background-color: #f8fafc;
+            border-left: 4px solid #64748b;
+            padding: 12px;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #475569;
+            line-height: 1.5;
+            margin-top: 15px;
+          }
+          .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e2e8f0;
+            color: #94a3b8;
+            font-size: 12px;
+          }
+          @media (max-width: 600px) {
+            body {
+              padding: 20px;
+            }
+            .receipt-container {
+              padding: 20px;
+            }
+            .header h1 {
+              font-size: 22px;
+            }
+            .section-title {
+              font-size: 12px;
+            }
+            .info-row, .settlement-row {
+              font-size: 12px;
+            }
+          }
+          @media print {
+            body {
+              background-color: white;
+              padding: 0;
+            }
+            .receipt-container {
+              box-shadow: none;
+              border-radius: 0;
+              max-width: 100%;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="receipt-container">
+          <div class="header">
+            <h1>LEASE END SETTLEMENT RECEIPT</h1>
+            <p>Settlement Date: ${formatDate(receipt.leaseEndDate)}</p>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Tenant Information</div>
+            <div class="info-row">
+              <span class="label">Tenant Name</span>
+              <span class="value">${receipt.tenantName}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Phone Number</span>
+              <span class="value">${receipt.tenantPhone}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Unit Number</span>
+              <span class="value">${receipt.unitNumber}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Building</span>
+              <span class="value">${receipt.buildingName}</span>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Deposit & Settlement Summary</div>
+            <div class="settlement-box">
+              <div class="settlement-row">
+                <span class="label">Security Deposit Amount:</span>
+                <span class="value">${formatCurrency(receipt.depositAmount)}</span>
+              </div>
+
+              <div class="deductions-breakdown">
+                <div class="section-title" style="border: none; padding: 0; margin: 0 0 10px 0;">Deductions Breakdown</div>
+                ${receipt.existingDeductions > 0 ? `
+                <div class="deduction-item">
+                  <span class="label">Previous Deductions:</span>
+                  <span class="value">${formatCurrency(receipt.existingDeductions)}</span>
+                </div>
+                ` : ''}
+                ${receipt.arrears > 0 ? `
+                <div class="deduction-item">
+                  <span class="label">Outstanding Arrears:</span>
+                  <span class="value">${formatCurrency(receipt.arrears)}</span>
+                </div>
+                ` : ''}
+                ${receipt.damages > 0 ? `
+                <div class="deduction-item">
+                  <span class="label">Damages:</span>
+                  <span class="value">${formatCurrency(receipt.damages)}</span>
+                </div>
+                ` : ''}
+              </div>
+
+              <div class="settlement-total">
+                <span>Total Deducted:</span>
+                <span style="color: #dc2626;">- ${formatCurrency(receipt.totalDeductions)}</span>
+              </div>
+
+              <div class="refund-amount">
+                <span>Amount to Refund:</span>
+                <span>${formatCurrency(receipt.refundAmount)}</span>
+              </div>
+            </div>
+          </div>
+
+          ${receipt.damagesDescription ? `
+          <div class="section">
+            <div class="section-title">Damages Notes</div>
+            <div class="notes">${receipt.damagesDescription}</div>
+          </div>
+          ` : ''}
+
+          <div class="footer">
+            <p>This is an official settlement receipt for lease end processing.</p>
+            <p style="margin-top: 8px;">Generated on ${new Date().toLocaleString()}</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `
+  }
+
+  const handlePrintReceipt = () => {
+    if (!settlementReceipt) return
+    const html = generateReceiptHTML(settlementReceipt)
+    const printWindow = window.open('', '_blank')
+    if (printWindow) {
+      printWindow.document.write(html)
+      printWindow.document.close()
+      setTimeout(() => {
+        printWindow.print()
+      }, 250)
+    }
+  }
+
+  const handleDownloadReceipt = () => {
+    if (!settlementReceipt) return
+    const html = generateReceiptHTML(settlementReceipt)
+    const blob = new Blob([html], { type: 'text/html' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `lease-settlement-${settlementReceipt.tenantName.replace(/\s+/g, '-')}-${new Date().toISOString().split('T')[0]}.html`
+    document.body.appendChild(a)
+    a.click()
+    window.URL.revokeObjectURL(url)
+    document.body.removeChild(a)
   }
 
   const visibleDeposits = (deposits || []).filter((d: any) => {
@@ -749,6 +1084,175 @@ export default function SecurityDeposits() {
                   className="flex-1 btn btn-secondary"
                 >
                   Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Settlement Receipt Modal */}
+      {showReceiptModal && settlementReceipt && (
+        <div className="modal-overlay" onClick={() => {
+          setShowReceiptModal(false)
+          setSettlementReceipt(null)
+        }}>
+          <div className="modal-content max-w-4xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6">
+              <div className="flex items-start justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mb-2">
+                    Settlement Receipt
+                  </h2>
+                  <p className="text-sm text-slate-600 dark:text-zinc-400">
+                    Lease end settlement for {settlementReceipt.tenantName}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowReceiptModal(false)
+                    setSettlementReceipt(null)
+                  }}
+                  className="text-slate-400 hover:text-slate-600"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              {/* Receipt Preview */}
+              <div className="mb-6 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-xl p-8 max-h-[50vh] overflow-y-auto">
+                <div className="max-w-2xl mx-auto space-y-6">
+                  {/* Header */}
+                  <div className="text-center border-b-2 border-slate-300 dark:border-zinc-700 pb-6">
+                    <h1 className="text-3xl font-bold text-primary-600 dark:text-primary-400 mb-2">
+                      LEASE END SETTLEMENT RECEIPT
+                    </h1>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
+                      Settlement Date: {formatDate(settlementReceipt.leaseEndDate)}
+                    </p>
+                  </div>
+
+                  {/* Tenant Info */}
+                  <div>
+                    <h3 className="font-semibold mb-3 text-sm uppercase tracking-wide text-primary-600 dark:text-primary-400">
+                      Tenant Information
+                    </h3>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-600 dark:text-slate-400">Tenant Name:</span>
+                        <span className="font-semibold text-slate-900 dark:text-slate-100">{settlementReceipt.tenantName}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-600 dark:text-slate-400">Phone:</span>
+                        <span className="font-semibold text-slate-900 dark:text-slate-100">{settlementReceipt.tenantPhone}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-600 dark:text-slate-400">Unit:</span>
+                        <span className="font-semibold text-slate-900 dark:text-slate-100">{settlementReceipt.unitNumber}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-600 dark:text-slate-400">Building:</span>
+                        <span className="font-semibold text-slate-900 dark:text-slate-100">{settlementReceipt.buildingName}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Settlement Summary */}
+                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50 rounded-lg p-4">
+                    <h3 className="font-semibold mb-3 text-sm uppercase tracking-wide text-primary-600 dark:text-primary-400">
+                      Settlement Summary
+                    </h3>
+                    
+                    <div className="space-y-2 mb-4">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-600 dark:text-slate-400">Security Deposit:</span>
+                        <span className="font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(settlementReceipt.depositAmount)}</span>
+                      </div>
+                    </div>
+
+                    {/* Deductions */}
+                    <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800/50 rounded p-3 mb-4">
+                      <p className="text-xs font-semibold text-orange-900 dark:text-orange-300 mb-2 uppercase">Deductions</p>
+                      <div className="space-y-1">
+                        {settlementReceipt.existingDeductions > 0 && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-orange-700 dark:text-orange-400">Previous Deductions:</span>
+                            <span className="font-semibold text-orange-700 dark:text-orange-400">{formatCurrency(settlementReceipt.existingDeductions)}</span>
+                          </div>
+                        )}
+                        {settlementReceipt.arrears > 0 && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-orange-700 dark:text-orange-400">Outstanding Arrears:</span>
+                            <span className="font-semibold text-orange-700 dark:text-orange-400">{formatCurrency(settlementReceipt.arrears)}</span>
+                          </div>
+                        )}
+                        {settlementReceipt.damages > 0 && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-orange-700 dark:text-orange-400">Damages:</span>
+                            <span className="font-semibold text-orange-700 dark:text-orange-400">{formatCurrency(settlementReceipt.damages)}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between text-sm font-bold border-t-2 border-blue-200 dark:border-blue-800/50 pt-3 mb-3">
+                      <span className="text-slate-900 dark:text-slate-100">Total Deducted:</span>
+                      <span className="text-red-600 dark:text-red-400">- {formatCurrency(settlementReceipt.totalDeductions)}</span>
+                    </div>
+
+                    <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800/50 rounded p-3">
+                      <div className="flex justify-between">
+                        <span className="font-bold text-green-900 dark:text-green-300">Amount to Refund:</span>
+                        <span className="text-lg font-bold text-green-600 dark:text-green-400">{formatCurrency(settlementReceipt.refundAmount)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Damages Notes */}
+                  {settlementReceipt.damagesDescription && (
+                    <div>
+                      <h3 className="font-semibold mb-2 text-sm uppercase tracking-wide text-primary-600 dark:text-primary-400">
+                        Damages Notes
+                      </h3>
+                      <p className="text-sm text-slate-600 dark:text-slate-400 bg-gray-50 dark:bg-gray-900/40 p-3 rounded">
+                        {settlementReceipt.damagesDescription}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Footer */}
+                  <div className="text-center text-xs text-slate-500 dark:text-slate-500 border-t border-slate-200 dark:border-slate-700 pt-4">
+                    <p>This is an official settlement receipt for lease end processing.</p>
+                    <p className="mt-2">Generated on {new Date().toLocaleString()}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-4 border-t border-slate-200 dark:border-zinc-800">
+                <button
+                  onClick={() => {
+                    setShowReceiptModal(false)
+                    setSettlementReceipt(null)
+                  }}
+                  className="flex-1 btn btn-secondary"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={handlePrintReceipt}
+                  className="flex-1 btn btn-primary flex items-center justify-center gap-2"
+                >
+                  <Printer size={18} />
+                  Print Receipt
+                </button>
+                <button
+                  onClick={handleDownloadReceipt}
+                  className="flex-1 btn btn-primary flex items-center justify-center gap-2"
+                  title="Download as HTML file"
+                >
+                  <Download size={18} />
+                  Download
                 </button>
               </div>
             </div>
