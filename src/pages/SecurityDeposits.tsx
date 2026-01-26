@@ -544,15 +544,20 @@ export default function SecurityDeposits() {
                 {(() => {
                   const totalBalance = leaseEndTenantBills.reduce((sum: number, bill: any) => sum + (bill.balance || 0), 0)
                   const depositAmount = selectedDeposit.amount || 0
+                  const existingDeductions = selectedDeposit.total_deductions || 0
                   const newDamagesAmount = parseFloat(damagesAmount) || 0
-                  const totalDeductible = Math.min(depositAmount, totalBalance + newDamagesAmount)
-                  const refundAmount = Math.max(0, depositAmount - totalDeductible)
+                  const totalDeductions = existingDeductions + totalBalance + newDamagesAmount
+                  const refundAmount = Math.max(0, depositAmount - totalDeductions)
                   
                   return (
                     <div className="space-y-2 text-sm">
                       <div className="flex justify-between">
                         <span className="text-slate-600 dark:text-slate-400">Deposit Amount:</span>
                         <span className="font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(depositAmount)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-600 dark:text-slate-400">Existing Deductions:</span>
+                        <span className="font-semibold text-red-600 dark:text-red-400">{formatCurrency(existingDeductions)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-slate-600 dark:text-slate-400">Tenant Arrears/Balance:</span>
@@ -564,8 +569,8 @@ export default function SecurityDeposits() {
                       </div>
                       <div className="border-t border-blue-200 dark:border-blue-800/50 pt-2 my-2"></div>
                       <div className="flex justify-between bg-white dark:bg-blue-900/40 p-2 rounded">
-                        <span className="font-semibold text-slate-900 dark:text-slate-100">Total Amount to Deduct:</span>
-                        <span className="font-bold text-red-600 dark:text-red-400">{formatCurrency(totalDeductible)}</span>
+                        <span className="font-semibold text-slate-900 dark:text-slate-100">Total Amount Deducted:</span>
+                        <span className="font-bold text-red-600 dark:text-red-400">{formatCurrency(totalDeductions)}</span>
                       </div>
                       <div className="flex justify-between bg-white dark:bg-blue-900/40 p-2 rounded">
                         <span className="font-semibold text-slate-900 dark:text-slate-100">Amount to Refund:</span>
