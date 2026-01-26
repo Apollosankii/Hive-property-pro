@@ -708,6 +708,57 @@ export default function SecurityDeposits() {
     document.body.removeChild(a)
   }
 
+  const handleViewProcessedReceipt = async (deposit: SecurityDeposit) => {
+    // Load the tenant bills to generate the receipt
+    try {
+      const { data: billsData } = await supabase
+        .from('bills')
+        .select('id, billing_month, arrears_brought_forward, water_amount, elec_amount, rent_amount, balance, amount_paid')
+        .eq('tenant_id', deposit.tenant_id)
+        .order('billing_month', { ascending: false })
+
+      const tenantBills = billsData || []
+      
+      // Generate receipt from the deposit data
+      const totalBalance = tenantBills.reduce((sum: number, bill: any) => sum + (bill.balance || 0), 0)
+      const depositAmount = deposit.amount || 0
+      const totalDeductions = deposit.total_deductions || 0
+      
+      // Filter unpaid bills
+      const unpaidBills = tenantBills
+        .filter((bill: any) => bill.balance > 0)
+        .map((bill: any) => ({
+          month: bill.billing_month,
+          rent: bill.rent_amount || 0,
+          water: bill.water_amount || 0,
+          electricity: bill.elec_amount || 0,
+          balance: bill.balance
+        }))
+
+      setSettlementReceipt({
+        tenantName: deposit.tenants?.name || 'N/A',
+        tenantPhone: deposit.tenants?.phone || 'N/A',
+        unitNumber: deposit.units?.unit_number || 'N/A',
+        buildingName: (deposit.units as any)?.buildings?.name || 'N/A',
+        leaseEndDate: new Date().toISOString().split('T')[0],
+        depositAmount,
+        existingDeductions: totalDeductions,
+        arrears: Math.max(0, totalBalance),
+        damages: 0, // We can't get this from just the deposit
+        totalDeductions,
+        refundAmount: deposit.refund_amount || 0,
+        damagesDescription: deposit.notes || '',
+        settlementNotes: `Lease ended. ${deposit.notes || 'No additional notes.'}`,
+        unpaidBills
+      })
+      
+      setShowReceiptModal(true)
+    } catch (err) {
+      console.error('Error loading receipt:', err)
+      setError('Failed to load receipt')
+    }
+  }
+
   const visibleDeposits = (deposits || []).filter((d: any) => {
     if (!search) return true
     const q = search.toLowerCase()
@@ -818,6 +869,15 @@ export default function SecurityDeposits() {
                             title="Process Lease End"
                           >
                             <FileText size={14} />
+                          </button>
+                        )}
+                        {(deposit.status === 'refunded' || deposit.status === 'forfeited') && (
+                          <button
+                            onClick={() => handleViewProcessedReceipt(deposit)}
+                            className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded transition-all"
+                            title="View Settlement Receipt"
+                          >
+                            <Download size={14} />
                           </button>
                         )}
                         <button
