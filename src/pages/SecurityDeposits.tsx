@@ -18,6 +18,13 @@ interface SettlementReceipt {
   refundAmount: number
   damagesDescription: string
   settlementNotes: string
+  unpaidBills: Array<{
+    month: string
+    rent: number
+    water: number
+    electricity: number
+    balance: number
+  }>
 }
 
 export default function SecurityDeposits() {
@@ -272,6 +279,17 @@ export default function SecurityDeposits() {
         const totalDeductions = existingDeductions + arrearsTodeduct + newDamagesAmount
         const refundAmount = depositAmount - totalDeductions - Math.min(0, totalBalance)
         
+        // Format unpaid bills for receipt
+        const unpaidBills = leaseEndTenantBills
+          .filter((bill: any) => bill.balance > 0)
+          .map((bill: any) => ({
+            month: bill.billing_month,
+            rent: bill.rent_amount || 0,
+            water: bill.water_amount || 0,
+            electricity: bill.elec_amount || 0,
+            balance: bill.balance
+          }))
+        
         setSettlementReceipt({
           tenantName: selectedDeposit.tenants?.name || 'N/A',
           tenantPhone: selectedDeposit.tenants?.phone || 'N/A',
@@ -285,7 +303,8 @@ export default function SecurityDeposits() {
           totalDeductions,
           refundAmount,
           damagesDescription,
-          settlementNotes: `Lease ended. ${damagesDescription || 'No additional notes.'}`
+          settlementNotes: `Lease ended. ${damagesDescription || 'No additional notes.'}`,
+          unpaidBills
         })
       }
       
@@ -479,6 +498,36 @@ export default function SecurityDeposits() {
             line-height: 1.5;
             margin-top: 15px;
           }
+          .bills-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+            font-size: 12px;
+          }
+          .bills-table th {
+            background-color: #e0e7ff;
+            color: #1e40af;
+            padding: 10px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid #1e40af;
+          }
+          .bills-table td {
+            padding: 10px;
+            border-bottom: 1px solid #e2e8f0;
+            color: #475569;
+          }
+          .bills-table tr:last-child td {
+            border-bottom: none;
+          }
+          .bill-month {
+            font-weight: 600;
+            color: #1e293b;
+          }
+          .bill-amount {
+            text-align: right;
+            font-weight: 500;
+          }
           .footer {
             text-align: center;
             margin-top: 40px;
@@ -585,6 +634,35 @@ export default function SecurityDeposits() {
               </div>
             </div>
           </div>
+
+          ${receipt.unpaidBills.length > 0 ? `
+          <div class="section">
+            <div class="section-title">Unpaid Bills Breakdown</div>
+            <table class="bills-table">
+              <thead>
+                <tr>
+                  <th>Billing Month</th>
+                  <th style="text-align: right;">Rent</th>
+                  <th style="text-align: right;">Water</th>
+                  <th style="text-align: right;">Electricity</th>
+                  <th style="text-align: right;">Total Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${receipt.unpaidBills.map(bill => `
+                <tr>
+                  <td class="bill-month">${bill.month}</td>
+                  <td class="bill-amount">${formatCurrency(bill.rent)}</td>
+                  <td class="bill-amount">${formatCurrency(bill.water)}</td>
+                  <td class="bill-amount">${formatCurrency(bill.electricity)}</td>
+                  <td class="bill-amount" style="font-weight: 700; color: #dc2626;">${formatCurrency(bill.balance)}</td>
+                </tr>
+                `).join('')}
+              </tbody>
+            </table>
+            <p style="font-size: 12px; color: #64748b; margin-top: 12px;">These amounts have been deducted from the security deposit.</p>
+          </div>
+          ` : ''}
 
           ${receipt.damagesDescription ? `
           <div class="section">
@@ -1207,6 +1285,40 @@ export default function SecurityDeposits() {
                       <p className="text-sm text-slate-600 dark:text-slate-400 bg-gray-50 dark:bg-gray-900/40 p-3 rounded">
                         {settlementReceipt.damagesDescription}
                       </p>
+                    </div>
+                  )}
+
+                  {/* Unpaid Bills Breakdown */}
+                  {settlementReceipt.unpaidBills.length > 0 && (
+                    <div>
+                      <h3 className="font-semibold mb-3 text-sm uppercase tracking-wide text-primary-600 dark:text-primary-400">
+                        Unpaid Bills Breakdown
+                      </h3>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs border-collapse">
+                          <thead>
+                            <tr className="bg-primary-100 dark:bg-primary-900/30">
+                              <th className="text-left px-3 py-2 font-semibold text-slate-700 dark:text-slate-300 border-b border-primary-200 dark:border-primary-800">Billing Month</th>
+                              <th className="text-right px-3 py-2 font-semibold text-slate-700 dark:text-slate-300 border-b border-primary-200 dark:border-primary-800">Rent</th>
+                              <th className="text-right px-3 py-2 font-semibold text-slate-700 dark:text-slate-300 border-b border-primary-200 dark:border-primary-800">Water</th>
+                              <th className="text-right px-3 py-2 font-semibold text-slate-700 dark:text-slate-300 border-b border-primary-200 dark:border-primary-800">Electricity</th>
+                              <th className="text-right px-3 py-2 font-semibold text-slate-700 dark:text-slate-300 border-b border-primary-200 dark:border-primary-800">Total Balance</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {settlementReceipt.unpaidBills.map((bill, idx) => (
+                              <tr key={idx} className="border-b border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                                <td className="px-3 py-2 font-medium text-slate-900 dark:text-slate-100">{bill.month}</td>
+                                <td className="text-right px-3 py-2 text-slate-600 dark:text-slate-400">{formatCurrency(bill.rent)}</td>
+                                <td className="text-right px-3 py-2 text-slate-600 dark:text-slate-400">{formatCurrency(bill.water)}</td>
+                                <td className="text-right px-3 py-2 text-slate-600 dark:text-slate-400">{formatCurrency(bill.electricity)}</td>
+                                <td className="text-right px-3 py-2 font-bold text-red-600 dark:text-red-400">{formatCurrency(bill.balance)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">These amounts have been deducted from the security deposit.</p>
                     </div>
                   )}
 
