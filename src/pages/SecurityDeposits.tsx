@@ -546,9 +546,8 @@ export default function SecurityDeposits() {
                   const depositAmount = selectedDeposit.amount || 0
                   const currentDeductions = selectedDeposit.total_deductions || 0
                   const newDamagesAmount = parseFloat(damagesAmount) || 0
-                  const totalNewDeductions = currentDeductions + newDamagesAmount
                   const totalDeductible = Math.min(depositAmount, totalBalance + newDamagesAmount)
-                  const refundAmount = Math.max(0, depositAmount - totalNewDeductions - totalBalance)
+                  const refundAmount = Math.max(0, depositAmount - totalDeductible)
                   
                   return (
                     <div className="space-y-2 text-sm">
