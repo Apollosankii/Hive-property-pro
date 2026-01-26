@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, SecurityDeposit } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Shield, AlertCircle, X, FileText } from 'lucide-react'
+import { Shield, AlertCircle, X, FileText, Loader } from 'lucide-react'
 
 export default function SecurityDeposits() {
   const [selectedDeposit, setSelectedDeposit] = useState<SecurityDeposit | null>(null)
@@ -11,6 +11,8 @@ export default function SecurityDeposits() {
   const [damagesDescription, setDamagesDescription] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [leaseEndTenantBills, setLeaseEndTenantBills] = useState<any[]>([])
+  const [loadingBills, setLoadingBills] = useState(false)
   const queryClient = useQueryClient()
 
   const { data: deposits, error: depositsError, isLoading: depositsLoading } = useQuery({
@@ -238,6 +240,26 @@ export default function SecurityDeposits() {
     setSelectedDeposit(deposit)
     setShowLeaseEndModal(true)
     setError(null)
+    loadTenantBills(deposit.tenant_id)
+  }
+
+  const loadTenantBills = async (tenantId: string) => {
+    setLoadingBills(true)
+    try {
+      const { data: billsData, error: billsError } = await supabase
+        .from('bills')
+        .select('id, billing_month, arrears_brought_forward, water_amount, elec_amount, rent_amount, balance, amount_paid')
+        .eq('tenant_id', tenantId)
+        .order('billing_month', { ascending: false })
+
+      if (billsError) throw billsError
+      setLeaseEndTenantBills(billsData || [])
+    } catch (err) {
+      console.error('Error loading tenant bills:', err)
+      setError('Failed to load tenant billing details')
+    } finally {
+      setLoadingBills(false)
+    }
   }
 
   const handleSubmitLeaseEnd = (e: React.FormEvent) => {
@@ -396,15 +418,32 @@ export default function SecurityDeposits() {
           setShowLeaseEndModal(false)
           setSelectedDeposit(null)
           setError(null)
+          setLeaseEndTenantBills([])
+          setDamagesAmount('')
+          setDamagesDescription('')
         }}>
-          <div className="modal-content max-w-md" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
-              <h2 className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mb-2">
-                Process Lease End
-              </h2>
-              <p className="text-sm text-slate-600 dark:text-zinc-400 mb-6">
-                Calculate deductions and process refund for {selectedDeposit.tenants?.name || 'tenant'}
-              </p>
+              <div className="flex items-start justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mb-2">
+                    Process Lease End
+                  </h2>
+                  <p className="text-sm text-slate-600 dark:text-zinc-400">
+                    Final settlement for {selectedDeposit.tenants?.name || 'tenant'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowLeaseEndModal(false)
+                    setSelectedDeposit(null)
+                    setError(null)
+                  }}
+                  className="text-slate-400 hover:text-slate-600"
+                >
+                  <X size={24} />
+                </button>
+              </div>
 
               {error && (
                 <div className="mb-4 p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50 rounded-xl flex items-start gap-3">
@@ -422,7 +461,9 @@ export default function SecurityDeposits() {
                 </div>
               )}
 
-              <div className="mb-6 p-4 bg-slate-50 dark:bg-zinc-900 rounded-xl">
+              {/* Current Deposit Status */}
+              <div className="mb-6 p-4 bg-slate-50 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-700">
+                <h3 className="font-semibold text-slate-900 dark:text-slate-100 mb-3">Deposit Status</h3>
                 <div className="space-y-2">
                   <div className="flex justify-between">
                     <span className="text-sm text-slate-600 dark:text-zinc-400">Deposit Amount:</span>
@@ -433,16 +474,114 @@ export default function SecurityDeposits() {
                     <span className="font-medium text-red-600 dark:text-red-400">{formatCurrency(selectedDeposit.total_deductions || 0)}</span>
                   </div>
                   <div className="flex justify-between border-t border-slate-200 dark:border-zinc-700 pt-2">
-                    <span className="text-sm font-semibold text-slate-700 dark:text-zinc-300">Current Refund:</span>
+                    <span className="text-sm font-semibold text-slate-700 dark:text-zinc-300">Available Refund:</span>
                     <span className="font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(selectedDeposit.refund_amount || 0)}</span>
                   </div>
                 </div>
               </div>
 
+              {/* Arrears & Bills Breakdown */}
+              <div className="mb-6">
+                <h3 className="font-semibold text-slate-900 dark:text-slate-100 mb-3">Outstanding Arrears & Balances</h3>
+                {loadingBills ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader className="animate-spin text-primary-600 mr-2" size={20} />
+                    <span className="text-slate-600 dark:text-slate-400">Loading billing details...</span>
+                  </div>
+                ) : leaseEndTenantBills.length > 0 ? (
+                  <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800/50 rounded-xl p-4">
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {leaseEndTenantBills.map((bill: any) => (
+                        <div key={bill.id} className="bg-white dark:bg-zinc-800 p-3 rounded-lg">
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <p className="font-medium text-slate-900 dark:text-slate-100">{bill.billing_month}</p>
+                              <p className="text-xs text-slate-500 dark:text-slate-400">
+                                Rent: {formatCurrency(bill.rent_amount)} | Water: {formatCurrency(bill.water_amount)} | Electricity: {formatCurrency(bill.elec_amount)}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-semibold text-slate-900 dark:text-slate-100">Balance: {formatCurrency(bill.balance)}</p>
+                              {bill.arrears_brought_forward > 0 && (
+                                <p className="text-xs text-orange-600 dark:text-orange-400">Arrears: {formatCurrency(bill.arrears_brought_forward)}</p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-orange-200 dark:border-orange-800/50">
+                      {(() => {
+                        const totalBalance = leaseEndTenantBills.reduce((sum: number, bill: any) => sum + (bill.balance || 0), 0)
+                        const totalArrears = leaseEndTenantBills.reduce((sum: number, bill: any) => sum + (bill.arrears_brought_forward || 0), 0)
+                        return (
+                          <>
+                            <div className="flex justify-between mb-2">
+                              <span className="font-semibold text-orange-900 dark:text-orange-300">Total Outstanding Balance:</span>
+                              <span className="font-bold text-red-600 dark:text-red-400">{formatCurrency(totalBalance)}</span>
+                            </div>
+                            {totalArrears > 0 && (
+                              <div className="flex justify-between">
+                                <span className="font-semibold text-orange-900 dark:text-orange-300">Total Arrears Brought Forward:</span>
+                                <span className="font-bold text-orange-600 dark:text-orange-400">{formatCurrency(totalArrears)}</span>
+                              </div>
+                            )}
+                          </>
+                        )
+                      })()}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800/50 rounded-xl p-4">
+                    <p className="text-sm text-green-700 dark:text-green-300">✓ No outstanding arrears or balances</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Settlement Calculation */}
+              <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50 rounded-xl">
+                <h3 className="font-semibold text-slate-900 dark:text-slate-100 mb-3">Settlement Calculation</h3>
+                {(() => {
+                  const totalBalance = leaseEndTenantBills.reduce((sum: number, bill: any) => sum + (bill.balance || 0), 0)
+                  const depositAmount = selectedDeposit.amount || 0
+                  const currentDeductions = selectedDeposit.total_deductions || 0
+                  const newDamagesAmount = parseFloat(damagesAmount) || 0
+                  const totalNewDeductions = currentDeductions + newDamagesAmount
+                  const totalDeductible = Math.min(depositAmount, totalBalance + newDamagesAmount)
+                  const refundAmount = Math.max(0, depositAmount - totalNewDeductions - totalBalance)
+                  
+                  return (
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-slate-600 dark:text-slate-400">Deposit Amount:</span>
+                        <span className="font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(depositAmount)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-600 dark:text-slate-400">Tenant Arrears/Balance:</span>
+                        <span className="font-semibold text-red-600 dark:text-red-400">{formatCurrency(totalBalance)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-600 dark:text-slate-400">Damages (to be added):</span>
+                        <span className="font-semibold text-orange-600 dark:text-orange-400">{formatCurrency(newDamagesAmount)}</span>
+                      </div>
+                      <div className="border-t border-blue-200 dark:border-blue-800/50 pt-2 my-2"></div>
+                      <div className="flex justify-between bg-white dark:bg-blue-900/40 p-2 rounded">
+                        <span className="font-semibold text-slate-900 dark:text-slate-100">Total Amount to Deduct:</span>
+                        <span className="font-bold text-red-600 dark:text-red-400">{formatCurrency(totalDeductible)}</span>
+                      </div>
+                      <div className="flex justify-between bg-white dark:bg-blue-900/40 p-2 rounded">
+                        <span className="font-semibold text-slate-900 dark:text-slate-100">Amount to Refund:</span>
+                        <span className="font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(refundAmount)}</span>
+                      </div>
+                    </div>
+                  )
+                })()}
+              </div>
+
               <form onSubmit={handleSubmitLeaseEnd} className="space-y-5">
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-200 mb-2">
-                    Damages Amount (KES)
+                    Additional Damages Amount (KES)
                   </label>
                   <input
                     type="number"
@@ -453,6 +592,9 @@ export default function SecurityDeposits() {
                     className="input"
                     placeholder="0.00"
                   />
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Enter any damages or additional deductions beyond arrears
+                  </p>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-200 mb-2">
@@ -474,6 +616,9 @@ export default function SecurityDeposits() {
                       setShowLeaseEndModal(false)
                       setSelectedDeposit(null)
                       setError(null)
+                      setLeaseEndTenantBills([])
+                      setDamagesAmount('')
+                      setDamagesDescription('')
                     }}
                     className="flex-1 btn btn-secondary"
                   >

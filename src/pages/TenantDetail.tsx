@@ -2,7 +2,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate, formatMonth } from '@/lib/utils'
-import { ArrowLeft, User, Phone, Mail, Home, Receipt, CreditCard } from 'lucide-react'
+import { ArrowLeft, User, Phone, Mail, Home, Receipt, CreditCard, Calendar, AlertCircle } from 'lucide-react'
 
 export default function TenantDetail() {
   const { id } = useParams<{ id: string }>()
@@ -44,6 +44,21 @@ export default function TenantDetail() {
         .select('*, bills(billing_month)')
         .eq('tenant_id', id)
         .order('payment_date', { ascending: false })
+      
+      if (error) throw error
+      return data || []
+    },
+    enabled: !!id,
+  })
+
+  const { data: settlements } = useQuery({
+    queryKey: ['tenant-settlements', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('lease_end_settlements')
+        .select('*')
+        .eq('tenant_id', id)
+        .order('lease_end_date', { ascending: false })
       
       if (error) throw error
       return data || []
@@ -155,6 +170,88 @@ export default function TenantDetail() {
           </p>
         </div>
       </div>
+
+      {/* Lease Information */}
+      {(tenant.lease_start || tenant.lease_end) && (
+        <div className="card">
+          <div className="flex items-center gap-3 mb-4">
+            <Calendar className="text-primary-600" size={24} />
+            <h2 className="text-xl font-bold text-gray-900">Lease Information</h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {tenant.lease_start && (
+              <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                <p className="text-sm text-blue-600 dark:text-blue-400 mb-1">Lease Start Date</p>
+                <p className="text-lg font-semibold text-gray-900 dark:text-white">
+                  {formatDate(tenant.lease_start)}
+                </p>
+              </div>
+            )}
+            {tenant.lease_end && (
+              <div className={`p-4 rounded-lg border ${
+                tenant.status === 'inactive' 
+                  ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800' 
+                  : 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800'
+              }`}>
+                <p className={`text-sm mb-1 ${
+                  tenant.status === 'inactive' 
+                    ? 'text-red-600 dark:text-red-400' 
+                    : 'text-orange-600 dark:text-orange-400'
+                }`}>
+                  Lease End Date
+                </p>
+                <p className="text-lg font-semibold text-gray-900 dark:text-white">
+                  {formatDate(tenant.lease_end)}
+                </p>
+              </div>
+            )}
+          </div>
+          {tenant.lease_end_notes && (
+            <div className="mt-4 p-4 bg-gray-50 dark:bg-zinc-800 rounded-lg border border-gray-200 dark:border-zinc-700">
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Settlement Notes</p>
+              <p className="text-gray-900 dark:text-white">{tenant.lease_end_notes}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Lease End Settlement */}
+      {settlements && settlements.length > 0 && (
+        <div className="card">
+          <div className="flex items-center gap-3 mb-4">
+            <AlertCircle className="text-orange-600" size={24} />
+            <h2 className="text-xl font-bold text-gray-900">Lease End Settlement</h2>
+          </div>
+          {settlements.map((settlement: any) => (
+            <div key={settlement.id} className="bg-gradient-to-r from-orange-50 to-red-50 dark:from-orange-900/20 dark:to-red-900/20 rounded-lg p-4 border border-orange-200 dark:border-orange-800">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                <div>
+                  <p className="text-sm text-orange-600 dark:text-orange-400 mb-1">Settlement Date</p>
+                  <p className="font-semibold text-gray-900 dark:text-white">{formatDate(settlement.lease_end_date)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-red-600 dark:text-red-400 mb-1">Total Arrears</p>
+                  <p className="font-semibold text-gray-900 dark:text-white">{formatCurrency(settlement.total_arrears)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-red-600 dark:text-red-400 mb-1">Amount Deducted</p>
+                  <p className="font-semibold text-gray-900 dark:text-white">{formatCurrency(settlement.total_deductible)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-emerald-600 dark:text-emerald-400 mb-1">Amount Refunded</p>
+                  <p className="font-semibold text-gray-900 dark:text-white">{formatCurrency(settlement.amount_to_refund)}</p>
+                </div>
+              </div>
+              {settlement.settlement_notes && (
+                <div className="mt-3 p-3 bg-white dark:bg-zinc-800 rounded border border-gray-200 dark:border-zinc-700">
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Notes</p>
+                  <p className="text-gray-900 dark:text-white">{settlement.settlement_notes}</p>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="card">
         <h2 className="text-xl font-bold text-gray-900 mb-4">Billing History</h2>
