@@ -174,6 +174,38 @@ export default function SecurityDeposits() {
         status
       })
 
+      // Clear all bills (mark as paid) for this tenant since deductions have been made
+      const { error: billsClearError } = await supabase
+        .from('bills')
+        .update({ 
+          amount_paid: supabase.rpc('coalesce', [supabase.raw('total_amount'), 0]),
+          balance: 0,
+          status: 'paid'
+        })
+        .eq('tenant_id', depositData.tenant_id)
+
+      // If bills clear fails, try a simpler approach
+      if (billsClearError) {
+        // Get all bills and update them individually
+        const { data: allBills } = await supabase
+          .from('bills')
+          .select('id, total_amount')
+          .eq('tenant_id', depositData.tenant_id)
+
+        if (allBills && allBills.length > 0) {
+          for (const bill of allBills) {
+            await supabase
+              .from('bills')
+              .update({
+                amount_paid: bill.total_amount,
+                balance: 0,
+                status: 'paid'
+              })
+              .eq('id', bill.id)
+          }
+        }
+      }
+
       // Explicitly set updated_at to ensure it's updated for the reports query
       const now = new Date().toISOString()
       const { error: updateError } = await supabase
