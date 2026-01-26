@@ -544,7 +544,6 @@ export default function SecurityDeposits() {
                 {(() => {
                   const totalBalance = leaseEndTenantBills.reduce((sum: number, bill: any) => sum + (bill.balance || 0), 0)
                   const depositAmount = selectedDeposit.amount || 0
-                  const currentDeductions = selectedDeposit.total_deductions || 0
                   const newDamagesAmount = parseFloat(damagesAmount) || 0
                   const totalDeductible = Math.min(depositAmount, totalBalance + newDamagesAmount)
                   const refundAmount = Math.max(0, depositAmount - totalDeductible)
