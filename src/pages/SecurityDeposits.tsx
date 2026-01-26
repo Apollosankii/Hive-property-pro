@@ -546,10 +546,11 @@ export default function SecurityDeposits() {
                   const depositAmount = selectedDeposit.amount || 0
                   const existingDeductions = selectedDeposit.total_deductions || 0
                   const newDamagesAmount = parseFloat(damagesAmount) || 0
-                  // Only deduct positive balance (money owed), not negative balance (overpayment)
+                  // Deduct only positive balance (arrears), not negative (overpayment adds to refund)
                   const arrearsTodeduct = Math.max(0, totalBalance)
                   const totalDeductions = existingDeductions + arrearsTodeduct + newDamagesAmount
-                  const refundAmount = Math.max(0, depositAmount - totalDeductions)
+                  // If overpaid (negative), add to refund; if arrears (positive), subtract from refund
+                  const refundAmount = depositAmount - totalDeductions - Math.min(0, totalBalance)
                   
                   return (
                     <div className="space-y-2 text-sm">
@@ -561,19 +562,27 @@ export default function SecurityDeposits() {
                         <span className="text-slate-600 dark:text-slate-400">Existing Deductions:</span>
                         <span className="font-semibold text-red-600 dark:text-red-400">{formatCurrency(existingDeductions)}</span>
                       </div>
-                      <div className={`p-2 rounded ${totalBalance < 0 ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800' : ''}`}>
-                        <div className="flex justify-between">
-                          <span className={`text-slate-600 dark:text-slate-400 ${totalBalance < 0 ? 'text-green-700 dark:text-green-300 font-semibold' : ''}`}>
-                            {totalBalance < 0 ? 'Tenant Overpayment (Credit):' : 'Tenant Arrears/Balance:'}
-                          </span>
-                          <span className={`font-semibold ${totalBalance < 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                            {formatCurrency(totalBalance)}
-                          </span>
+                      {totalBalance !== 0 && (
+                        <div className={`p-2 rounded ${totalBalance < 0 ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800' : ''}`}>
+                          <div className="flex justify-between">
+                            <span className={`text-slate-600 dark:text-slate-400 ${totalBalance < 0 ? 'text-green-700 dark:text-green-300 font-semibold' : ''}`}>
+                              {totalBalance < 0 ? 'Tenant Overpayment (Credit):' : 'Tenant Arrears/Balance:'}
+                            </span>
+                            <span className={`font-semibold ${totalBalance < 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                              {formatCurrency(totalBalance)}
+                            </span>
+                          </div>
+                          {totalBalance < 0 && (
+                            <p className="text-xs text-green-700 dark:text-green-400 mt-1">Tenant paid more than due - added to deposit</p>
+                          )}
                         </div>
-                        {totalBalance < 0 && (
-                          <p className="text-xs text-green-700 dark:text-green-400 mt-1">Tenant paid more than what was due</p>
-                        )}
-                      </div>
+                      )}
+                      {arrearsTodeduct > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-slate-600 dark:text-slate-400">Arrears to Deduct:</span>
+                          <span className="font-semibold text-red-600 dark:text-red-400">{formatCurrency(arrearsTodeduct)}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between">
                         <span className="text-slate-600 dark:text-slate-400">Damages (to be added):</span>
                         <span className="font-semibold text-orange-600 dark:text-orange-400">{formatCurrency(newDamagesAmount)}</span>
