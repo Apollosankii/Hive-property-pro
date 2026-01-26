@@ -193,34 +193,22 @@ export default function SecurityDeposits() {
       })
 
       // Clear all bills (mark as paid) for this tenant since deductions have been made
-      const { error: billsClearError } = await supabase
+      // Get all bills to set amount_paid to total_amount
+      const { data: billsToUpdate } = await supabase
         .from('bills')
-        .update({ 
-          amount_paid: supabase.rpc('coalesce', [supabase.raw('total_amount'), 0]),
-          balance: 0,
-          status: 'paid'
-        })
+        .select('id, total_amount')
         .eq('tenant_id', depositData.tenant_id)
 
-      // If bills clear fails, try a simpler approach
-      if (billsClearError) {
-        // Get all bills and update them individually
-        const { data: allBills } = await supabase
-          .from('bills')
-          .select('id, total_amount')
-          .eq('tenant_id', depositData.tenant_id)
-
-        if (allBills && allBills.length > 0) {
-          for (const bill of allBills) {
-            await supabase
-              .from('bills')
-              .update({
-                amount_paid: bill.total_amount,
-                balance: 0,
-                status: 'paid'
-              })
-              .eq('id', bill.id)
-          }
+      if (billsToUpdate && billsToUpdate.length > 0) {
+        for (const bill of billsToUpdate) {
+          await supabase
+            .from('bills')
+            .update({ 
+              amount_paid: bill.total_amount,
+              balance: 0,
+              status: 'paid'
+            })
+            .eq('id', bill.id)
         }
       }
 
@@ -274,30 +262,32 @@ export default function SecurityDeposits() {
       await queryClient.invalidateQueries({ queryKey: ['refunds-report'] })
       await queryClient.invalidateQueries({ queryKey: ['financial-summary'] })
       
-      // Generate receipt data
-      const totalBalance = leaseEndTenantBills.reduce((sum: number, bill: any) => sum + (bill.balance || 0), 0)
-      const depositAmount = selectedDeposit.amount || 0
-      const existingDeductions = selectedDeposit.total_deductions || 0
-      const newDamagesAmount = parseFloat(damagesAmount) || 0
-      const arrearsTodeduct = Math.max(0, totalBalance)
-      const totalDeductions = existingDeductions + arrearsTodeduct + newDamagesAmount
-      const refundAmount = depositAmount - totalDeductions - Math.min(0, totalBalance)
-      
-      setSettlementReceipt({
-        tenantName: selectedDeposit.tenants?.name || 'N/A',
-        tenantPhone: selectedDeposit.tenants?.phone || 'N/A',
-        unitNumber: selectedDeposit.units?.unit_number || 'N/A',
-        buildingName: selectedDeposit.units?.buildings?.name || 'N/A',
-        leaseEndDate: new Date().toISOString().split('T')[0],
-        depositAmount,
-        existingDeductions,
-        arrears: arrearsTodeduct,
-        damages: newDamagesAmount,
-        totalDeductions,
-        refundAmount,
-        damagesDescription,
-        settlementNotes: `Lease ended. ${damagesDescription || 'No additional notes.'}`
-      })
+      // Generate receipt data - ensure selectedDeposit exists
+      if (selectedDeposit) {
+        const totalBalance = leaseEndTenantBills.reduce((sum: number, bill: any) => sum + (bill.balance || 0), 0)
+        const depositAmount = selectedDeposit.amount || 0
+        const existingDeductions = selectedDeposit.total_deductions || 0
+        const newDamagesAmount = parseFloat(damagesAmount) || 0
+        const arrearsTodeduct = Math.max(0, totalBalance)
+        const totalDeductions = existingDeductions + arrearsTodeduct + newDamagesAmount
+        const refundAmount = depositAmount - totalDeductions - Math.min(0, totalBalance)
+        
+        setSettlementReceipt({
+          tenantName: selectedDeposit.tenants?.name || 'N/A',
+          tenantPhone: selectedDeposit.tenants?.phone || 'N/A',
+          unitNumber: selectedDeposit.units?.unit_number || 'N/A',
+          buildingName: (selectedDeposit.units as any)?.buildings?.name || 'N/A',
+          leaseEndDate: new Date().toISOString().split('T')[0],
+          depositAmount,
+          existingDeductions,
+          arrears: arrearsTodeduct,
+          damages: newDamagesAmount,
+          totalDeductions,
+          refundAmount,
+          damagesDescription,
+          settlementNotes: `Lease ended. ${damagesDescription || 'No additional notes.'}`
+        })
+      }
       
       setShowLeaseEndModal(false)
       setShowReceiptModal(true)
