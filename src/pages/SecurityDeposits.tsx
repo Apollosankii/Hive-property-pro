@@ -1130,11 +1130,11 @@ export default function SecurityDeposits() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-sm text-slate-600 dark:text-zinc-400">Current Deductions:</span>
-                    <span className="font-medium text-red-600 dark:text-red-400">{formatCurrency(selectedDeposit.total_deductions || 0)}</span>
+                    <span className="font-medium text-red-600 dark:text-red-400">{formatCurrency(isEditingLeaseEnd ? 0 : (selectedDeposit.total_deductions || 0))}</span>
                   </div>
                   <div className="flex justify-between border-t border-slate-200 dark:border-zinc-700 pt-2">
                     <span className="text-sm font-semibold text-slate-700 dark:text-zinc-300">Available Refund:</span>
-                    <span className="font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(selectedDeposit.refund_amount || 0)}</span>
+                    <span className="font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(isEditingLeaseEnd ? selectedDeposit.amount : (selectedDeposit.refund_amount || 0))}</span>
                   </div>
                 </div>
               </div>
@@ -1281,12 +1281,10 @@ export default function SecurityDeposits() {
                         <span className="text-slate-600 dark:text-slate-400">Deposit Amount:</span>
                         <span className="font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(depositAmount)}</span>
                       </div>
-                      {!isEditingLeaseEnd && (
-                        <div className="flex justify-between">
-                          <span className="text-slate-600 dark:text-slate-400">Existing Deductions:</span>
-                          <span className="font-semibold text-red-600 dark:text-red-400">{formatCurrency(existingDeductions)}</span>
-                        </div>
-                      )}
+                      <div className="flex justify-between">
+                        <span className="text-slate-600 dark:text-slate-400">Existing Deductions:</span>
+                        <span className="font-semibold text-red-600 dark:text-red-400">{formatCurrency(existingDeductions)}</span>
+                      </div>
                       {totalBalance !== 0 && (
                         <div className={`p-2 rounded ${totalBalance < 0 ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800' : ''}`}>
                           <div className="flex justify-between">
