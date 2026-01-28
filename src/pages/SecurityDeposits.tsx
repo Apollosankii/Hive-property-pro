@@ -1049,7 +1049,7 @@ export default function SecurityDeposits() {
                 ) : leaseEndTenantBills.length > 0 ? (
                   <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800/50 rounded-xl p-4">
                     <div className="space-y-2 max-h-64 overflow-y-auto">
-                      {leaseEndTenantBills.map((bill: any) => (
+                      {leaseEndTenantBills.map((bill: any, idx: number) => (
                         <div key={bill.id} className="bg-white dark:bg-zinc-800 p-3 rounded-lg">
                           <div className="flex justify-between items-start mb-2">
                             <div>
@@ -1065,7 +1065,8 @@ export default function SecurityDeposits() {
                               )}
                             </div>
 
-                              {/* Final Meter Readings (apply deductions from final readings) - improved layout with live calculation */}
+                              {idx === 0 && (
+                              /* Final Meter Readings (apply deductions from final readings) - improved layout with live calculation */
                               <div className="mb-6 p-4 bg-white dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-700">
                                 <h3 className="font-semibold text-slate-900 dark:text-zinc-100 mb-3">Final Meter Readings</h3>
                                 <div className="grid grid-cols-1 gap-4">
@@ -1135,6 +1136,7 @@ export default function SecurityDeposits() {
                                   })()}
                                 </div>
                               </div>
+                              )}
                           </div>
                         </div>
                       ))}
