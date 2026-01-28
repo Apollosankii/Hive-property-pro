@@ -1409,6 +1409,22 @@ export default function Billing() {
                             >
                               <Edit size={12} />
                             </button>
+                            <button
+                              onClick={async () => {
+                                if (!confirm(`Delete bill for ${bill.units?.unit_number} (${bill.billing_month})? This action cannot be undone.`)) return
+                                try {
+                                  const { error } = await supabase.from('bills').delete().eq('id', bill.id)
+                                  if (error) throw error
+                                  await queryClient.invalidateQueries({ queryKey: ['bills', selectedMonth] })
+                                } catch (err: any) {
+                                  alert(err.message || 'Failed to delete bill')
+                                }
+                              }}
+                              className="p-1 text-slate-600 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-all"
+                              title="Delete Bill"
+                            >
+                              <X size={12} />
+                            </button>
                           </div>
                         </td>
                       </tr>
