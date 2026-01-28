@@ -34,10 +34,10 @@ export default function SecurityDeposits() {
   const [showLeaseEndModal, setShowLeaseEndModal] = useState(false)
   const [damagesAmount, setDamagesAmount] = useState('')
   const [damagesDescription, setDamagesDescription] = useState('')
-  const [finalWaterReading] = useState('')
-  const [finalElecReading] = useState('')
-  const [meterWaterRate] = useState('50')
-  const [meterElecRate] = useState('15')
+  const [finalWaterReading, setFinalWaterReading] = useState('')
+  const [finalElecReading, setFinalElecReading] = useState('')
+  const [meterWaterRate, setMeterWaterRate] = useState('50')
+  const [meterElecRate, setMeterElecRate] = useState('15')
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [leaseEndTenantBills, setLeaseEndTenantBills] = useState<any[]>([])
@@ -1096,6 +1096,58 @@ export default function SecurityDeposits() {
                     <p className="text-sm text-green-700 dark:text-green-300">✓ No outstanding arrears or balances</p>
                   </div>
                 )}
+              </div>
+
+              {/* Final Meter Readings (placed below bills list, above settlement calculation) */}
+              <div className="mb-6 p-4 bg-white dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-700">
+                <h3 className="font-semibold text-slate-900 dark:text-zinc-100 mb-3">Final Meter Readings</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-3 bg-slate-50 dark:bg-zinc-900 rounded-lg">
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-200 mb-2">Final Water Reading</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        value={finalWaterReading}
+                        onChange={(e) => setFinalWaterReading(e.target.value)}
+                        className="input flex-1"
+                        placeholder={String(leaseEndTenantBills.find((b: any) => typeof b.water_current_reading === 'number')?.water_current_reading || 0)}
+                      />
+                      <input
+                        type="number"
+                        value={meterWaterRate}
+                        onChange={(e) => setMeterWaterRate(e.target.value)}
+                        className="input w-28"
+                        placeholder="Rate"
+                      />
+                    </div>
+                    <div className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+                      <div>Previous: <span className="font-medium">{leaseEndTenantBills.find((b: any) => typeof b.water_current_reading === 'number')?.water_current_reading || 0}</span></div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 dark:bg-zinc-900 rounded-lg">
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-200 mb-2">Final Electricity Reading</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        value={finalElecReading}
+                        onChange={(e) => setFinalElecReading(e.target.value)}
+                        className="input flex-1"
+                        placeholder={String(leaseEndTenantBills.find((b: any) => typeof b.elec_current_reading === 'number')?.elec_current_reading || 0)}
+                      />
+                      <input
+                        type="number"
+                        value={meterElecRate}
+                        onChange={(e) => setMeterElecRate(e.target.value)}
+                        className="input w-28"
+                        placeholder="Rate"
+                      />
+                    </div>
+                    <div className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+                      <div>Previous: <span className="font-medium">{leaseEndTenantBills.find((b: any) => typeof b.elec_current_reading === 'number')?.elec_current_reading || 0}</span></div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Settlement Calculation */}
