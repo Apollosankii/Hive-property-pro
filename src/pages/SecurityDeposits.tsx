@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, SecurityDeposit } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { exportElementToPDF } from '@/lib/pdf'
 import { Shield, AlertCircle, X, FileText, Loader, Download, Printer, Edit2 } from 'lucide-react'
 
 interface SettlementReceipt {
@@ -841,6 +842,12 @@ export default function SecurityDeposits() {
     document.body.removeChild(a)
   }
 
+  const handleDownloadReceiptPDF = async () => {
+    if (!settlementReceipt) return
+    const filename = `lease-settlement-${settlementReceipt.tenantName.replace(/\s+/g, '-')}-${new Date().toISOString().split('T')[0]}.pdf`
+    await exportElementToPDF('settlement-receipt-content', filename)
+  }
+
   const handleViewProcessedReceipt = async (deposit: SecurityDeposit) => {
     // Load the tenant bills to generate the receipt
     try {
@@ -1490,7 +1497,7 @@ export default function SecurityDeposits() {
               </div>
 
               {/* Receipt Preview */}
-              <div className="mb-6 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-xl p-8 max-h-[50vh] overflow-y-auto">
+              <div id="settlement-receipt-content" className="mb-6 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-xl p-8 max-h-[50vh] overflow-y-auto">
                 <div className="max-w-2xl mx-auto space-y-6">
                   {/* Header */}
                   <div className="text-center border-b-2 border-slate-300 dark:border-zinc-700 pb-6">
@@ -1663,12 +1670,20 @@ export default function SecurityDeposits() {
                   Print Receipt
                 </button>
                 <button
-                  onClick={handleDownloadReceipt}
+                  onClick={handleDownloadReceiptPDF}
                   className="flex-1 btn btn-primary flex items-center justify-center gap-2"
+                  title="Download as PDF file"
+                >
+                  <Download size={18} />
+                  Download PDF
+                </button>
+                <button
+                  onClick={handleDownloadReceipt}
+                  className="flex-1 btn btn-secondary flex items-center justify-center gap-2"
                   title="Download as HTML file"
                 >
                   <Download size={18} />
-                  Download
+                  Download HTML
                 </button>
               </div>
             </div>
