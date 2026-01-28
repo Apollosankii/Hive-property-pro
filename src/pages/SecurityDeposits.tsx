@@ -25,6 +25,8 @@ interface SettlementReceipt {
     electricity: number
     balance: number
   }>
+  meterWaterDeduction?: number
+  meterElecDeduction?: number
 }
 
 export default function SecurityDeposits() {
@@ -32,6 +34,10 @@ export default function SecurityDeposits() {
   const [showLeaseEndModal, setShowLeaseEndModal] = useState(false)
   const [damagesAmount, setDamagesAmount] = useState('')
   const [damagesDescription, setDamagesDescription] = useState('')
+  const [finalWaterReading, setFinalWaterReading] = useState('')
+  const [finalElecReading, setFinalElecReading] = useState('')
+  const [meterWaterRate, setMeterWaterRate] = useState('50')
+  const [meterElecRate, setMeterElecRate] = useState('15')
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [leaseEndTenantBills, setLeaseEndTenantBills] = useState<any[]>([])
@@ -119,10 +125,12 @@ export default function SecurityDeposits() {
   })
 
   const processLeaseEndMutation = useMutation({
-    mutationFn: async ({ depositId, damagesAmount, damagesDescription }: { 
+    mutationFn: async ({ depositId, damagesAmount, damagesDescription, meterWaterAmount, meterElecAmount }: { 
       depositId: string
       damagesAmount: number
       damagesDescription: string
+      meterWaterAmount?: number
+      meterElecAmount?: number
     }) => {
       // Get tenant's outstanding balance and arrears
       const { data: depositData } = await supabase
@@ -154,6 +162,33 @@ export default function SecurityDeposits() {
           }])
 
         if (damagesError) throw damagesError
+      }
+
+      // Record meter deductions if provided
+      if (meterWaterAmount && meterWaterAmount > 0) {
+        const { error: meterWErr } = await supabase
+          .from('security_deposit_deductions')
+          .insert([{
+            security_deposit_id: depositId,
+            deduction_type: 'meter_water',
+            amount: meterWaterAmount,
+            description: 'Final water meter deduction at lease end'
+          }])
+
+        if (meterWErr) throw meterWErr
+      }
+
+      if (meterElecAmount && meterElecAmount > 0) {
+        const { error: meterEErr } = await supabase
+          .from('security_deposit_deductions')
+          .insert([{
+            security_deposit_id: depositId,
+            deduction_type: 'meter_electricity',
+            amount: meterElecAmount,
+            description: 'Final electricity meter deduction at lease end'
+          }])
+
+        if (meterEErr) throw meterEErr
       }
 
       // Record arrears deduction if any
@@ -275,8 +310,10 @@ export default function SecurityDeposits() {
         const depositAmount = selectedDeposit.amount || 0
         const existingDeductions = selectedDeposit.total_deductions || 0
         const newDamagesAmount = parseFloat(damagesAmount) || 0
+        const newMeterWater = parseFloat((parseFloat(meterWaterRate || '0') && finalWaterReading) ? ((parseFloat(finalWaterReading) - (leaseEndTenantBills[0]?.water_current_reading || 0)) * parseFloat(meterWaterRate || '0')).toString() : '0') || 0
+        const newMeterElec = parseFloat((parseFloat(meterElecRate || '0') && finalElecReading) ? ((parseFloat(finalElecReading) - (leaseEndTenantBills[0]?.elec_current_reading || 0)) * parseFloat(meterElecRate || '0')).toString() : '0') || 0
         const arrearsTodeduct = Math.max(0, totalBalance)
-        const totalDeductions = existingDeductions + arrearsTodeduct + newDamagesAmount
+        const totalDeductions = existingDeductions + arrearsTodeduct + newDamagesAmount + newMeterWater + newMeterElec
         const refundAmount = depositAmount - totalDeductions - Math.min(0, totalBalance)
         
         // Format unpaid bills for receipt
@@ -300,9 +337,12 @@ export default function SecurityDeposits() {
           existingDeductions,
           arrears: arrearsTodeduct,
           damages: newDamagesAmount,
-          totalDeductions,
-          refundAmount,
+          // include meter deductions in the receipt object for display
           damagesDescription,
+          totalDeductions,
+          meterWaterDeduction: newMeterWater,
+          meterElecDeduction: newMeterElec,
+          refundAmount,
           settlementNotes: `Lease ended. ${damagesDescription || 'No additional notes.'}`,
           unpaidBills
         })
@@ -333,7 +373,7 @@ export default function SecurityDeposits() {
     try {
       const { data: billsData, error: billsError } = await supabase
         .from('bills')
-        .select('id, billing_month, arrears_brought_forward, water_amount, elec_amount, rent_amount, balance, amount_paid')
+        .select('id, billing_month, arrears_brought_forward, water_amount, elec_amount, rent_amount, balance, amount_paid, water_current_reading, elec_current_reading')
         .eq('tenant_id', tenantId)
         .order('billing_month', { ascending: false })
 
@@ -351,10 +391,21 @@ export default function SecurityDeposits() {
     e.preventDefault()
     if (!selectedDeposit) return
 
+    const prevWater = leaseEndTenantBills[0]?.water_current_reading || 0
+    const prevElec = leaseEndTenantBills[0]?.elec_current_reading || 0
+    const waterUsage = Math.max(0, (parseFloat(finalWaterReading || '0') || 0) - (parseFloat(prevWater || '0') || 0))
+    const elecUsage = Math.max(0, (parseFloat(finalElecReading || '0') || 0) - (parseFloat(prevElec || '0') || 0))
+    const waterRate = parseFloat(meterWaterRate || '0') || 0
+    const elecRate = parseFloat(meterElecRate || '0') || 0
+    const waterDeduction = Math.max(0, waterUsage * waterRate)
+    const elecDeduction = Math.max(0, elecUsage * elecRate)
+
     processLeaseEndMutation.mutate({
       depositId: selectedDeposit.id,
       damagesAmount: parseFloat(damagesAmount) || 0,
-      damagesDescription: damagesDescription
+      damagesDescription: damagesDescription,
+      meterWaterAmount: waterDeduction,
+      meterElecAmount: elecDeduction
     })
   }
 
@@ -1001,6 +1052,59 @@ export default function SecurityDeposits() {
                                 <p className="text-xs text-orange-600 dark:text-orange-400">Arrears: {formatCurrency(bill.arrears_brought_forward)}</p>
                               )}
                             </div>
+
+                              {/* Final Meter Readings (apply deductions from final readings) */}
+                              <div className="mb-6 p-4 bg-white dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-700">
+                                <h3 className="font-semibold text-slate-900 dark:text-slate-100 mb-3">Final Meter Readings</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  <div>
+                                    <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-200 mb-2">Final Water Reading</label>
+                                    <input
+                                      type="number"
+                                      value={finalWaterReading}
+                                      onChange={(e) => setFinalWaterReading(e.target.value)}
+                                      className="input"
+                                      placeholder={(leaseEndTenantBills[0]?.water_current_reading || 0).toString()}
+                                    />
+                                    <div className="mt-2 flex gap-2 items-center">
+                                      <input
+                                        type="number"
+                                        value={meterWaterRate}
+                                        onChange={(e) => setMeterWaterRate(e.target.value)}
+                                        className="input w-28"
+                                        placeholder="Water rate"
+                                      />
+                                      <span className="text-sm text-slate-500">Rate per unit</span>
+                                    </div>
+                                    <p className="text-xs text-slate-500 mt-2">
+                                      Previous reading: {leaseEndTenantBills[0]?.water_current_reading ?? 'N/A'}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-200 mb-2">Final Electricity Reading</label>
+                                    <input
+                                      type="number"
+                                      value={finalElecReading}
+                                      onChange={(e) => setFinalElecReading(e.target.value)}
+                                      className="input"
+                                      placeholder={(leaseEndTenantBills[0]?.elec_current_reading || 0).toString()}
+                                    />
+                                    <div className="mt-2 flex gap-2 items-center">
+                                      <input
+                                        type="number"
+                                        value={meterElecRate}
+                                        onChange={(e) => setMeterElecRate(e.target.value)}
+                                        className="input w-28"
+                                        placeholder="Elec rate"
+                                      />
+                                      <span className="text-sm text-slate-500">Rate per unit</span>
+                                    </div>
+                                    <p className="text-xs text-slate-500 mt-2">
+                                      Previous reading: {leaseEndTenantBills[0]?.elec_current_reading ?? 'N/A'}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
                           </div>
                         </div>
                       ))}

@@ -1,11 +1,12 @@
 import { useParams, Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate, formatMonth } from '@/lib/utils'
-import { ArrowLeft, User, Phone, Mail, Home, Receipt, CreditCard, Calendar, AlertCircle } from 'lucide-react'
+import { ArrowLeft, User, Phone, Mail, Home, Receipt, CreditCard, Calendar, AlertCircle, X } from 'lucide-react'
 
 export default function TenantDetail() {
   const { id } = useParams<{ id: string }>()
+  const queryClient = useQueryClient()
 
   const { data: tenant } = useQuery({
     queryKey: ['tenant', id],
@@ -268,6 +269,7 @@ export default function TenantDetail() {
                 <th>Paid</th>
                 <th>Balance</th>
                 <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -305,6 +307,24 @@ export default function TenantDetail() {
                     >
                       {bill.status}
                     </span>
+                  </td>
+                  <td>
+                    <button
+                      onClick={async () => {
+                        if (!confirm('Delete this bill? This action cannot be undone.')) return
+                        try {
+                          const { error } = await supabase.from('bills').delete().eq('id', bill.id)
+                          if (error) throw error
+                          await queryClient.invalidateQueries({ queryKey: ['tenant-bills', id] })
+                        } catch (err: any) {
+                          alert(err.message || 'Failed to delete bill')
+                        }
+                      }}
+                      className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                      title="Delete Bill"
+                    >
+                      <X size={14} />
+                    </button>
                   </td>
                 </tr>
               ))}
