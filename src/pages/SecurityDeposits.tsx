@@ -382,6 +382,9 @@ export default function SecurityDeposits() {
       setSelectedDeposit(null)
       setDamagesAmount('')
       setDamagesDescription('')
+      setFinalWaterReading('')
+      setFinalElecReading('')
+      setIsEditingLeaseEnd(false)
       setError(null)
     },
     onError: (error: any) => {
@@ -1055,6 +1058,9 @@ export default function SecurityDeposits() {
           setLeaseEndTenantBills([])
           setDamagesAmount('')
           setDamagesDescription('')
+          setFinalWaterReading('')
+          setFinalElecReading('')
+          setIsEditingLeaseEnd(false)
         }}>
           <div className="modal-content max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
@@ -1072,6 +1078,9 @@ export default function SecurityDeposits() {
                     setShowLeaseEndModal(false)
                     setSelectedDeposit(null)
                     setError(null)
+                    setFinalWaterReading('')
+                    setFinalElecReading('')
+                    setIsEditingLeaseEnd(false)
                   }}
                   className="text-slate-400 hover:text-slate-600"
                 >
@@ -1355,6 +1364,9 @@ export default function SecurityDeposits() {
                       setLeaseEndTenantBills([])
                       setDamagesAmount('')
                       setDamagesDescription('')
+                      setFinalWaterReading('')
+                      setFinalElecReading('')
+                      setIsEditingLeaseEnd(false)
                     }}
                     className="flex-1 btn btn-secondary"
                   >
