@@ -170,7 +170,7 @@ export default function SecurityDeposits() {
           .from('security_deposit_deductions')
           .insert([{
             security_deposit_id: depositId,
-            deduction_type: 'meter_water',
+            deduction_type: 'other',
             amount: meterWaterAmount,
             description: 'Final water meter deduction at lease end'
           }])
@@ -183,7 +183,7 @@ export default function SecurityDeposits() {
           .from('security_deposit_deductions')
           .insert([{
             security_deposit_id: depositId,
-            deduction_type: 'meter_electricity',
+            deduction_type: 'other',
             amount: meterElecAmount,
             description: 'Final electricity meter deduction at lease end'
           }])
