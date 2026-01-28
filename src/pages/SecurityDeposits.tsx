@@ -845,8 +845,19 @@ export default function SecurityDeposits() {
 
   const handleDownloadReceiptPDF = async () => {
     if (!settlementReceipt) return
-    const filename = `lease-settlement-${settlementReceipt.tenantName.replace(/\s+/g, '-')}-${new Date().toISOString().split('T')[0]}.pdf`
-    await exportElementToPDF('settlement-receipt-content', filename)
+    
+    // Temporarily adjust the receipt element for full capture
+    const element = document.getElementById('settlement-receipt-content')
+    if (element) {
+      const originalClass = element.className
+      element.className = element.className.replace('max-h-[50vh] overflow-y-auto', '')
+      
+      const filename = `lease-settlement-${settlementReceipt.tenantName.replace(/\s+/g, '-')}-${new Date().toISOString().split('T')[0]}.pdf`
+      await exportElementToPDF('settlement-receipt-content', filename)
+      
+      // Restore original class
+      element.className = originalClass
+    }
   }
 
   const handleViewProcessedReceipt = async (deposit: SecurityDeposit) => {
