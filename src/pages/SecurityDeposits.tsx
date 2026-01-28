@@ -835,7 +835,76 @@ export default function SecurityDeposits() {
     <div className="space-y-4 animate-fade-in w-full max-w-full overflow-x-hidden">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 dark:from-slate-100 dark:to-slate-300 bg-clip-text text-transparent">
+                    </div>
+
+                    {/* Final Meter Readings - placed below bills list for clarity */}
+                    <div className="mt-4 mb-6 p-4 bg-white dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-700">
+                      <h3 className="font-semibold text-slate-900 dark:text-zinc-100 mb-3">Final Meter Readings</h3>
+                      {(() => {
+                        const prevWater = leaseEndTenantBills.find((b: any) => typeof b.water_current_reading === 'number')?.water_current_reading || 0
+                        const prevElec = leaseEndTenantBills.find((b: any) => typeof b.elec_current_reading === 'number')?.elec_current_reading || 0
+                        const waterUsage = Math.max(0, (parseFloat(finalWaterReading || '0') || 0) - (parseFloat(prevWater || '0') || 0))
+                        const elecUsage = Math.max(0, (parseFloat(finalElecReading || '0') || 0) - (parseFloat(prevElec || '0') || 0))
+                        const waterRateNum = parseFloat(meterWaterRate || '0') || 0
+                        const elecRateNum = parseFloat(meterElecRate || '0') || 0
+                        const waterDeduction = Math.max(0, waterUsage * waterRateNum)
+                        const elecDeduction = Math.max(0, elecUsage * elecRateNum)
+
+                        return (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="p-3 bg-slate-50 dark:bg-zinc-900 rounded-lg">
+                              <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-200 mb-2">Final Water Reading</label>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="number"
+                                  value={finalWaterReading}
+                                  onChange={(e) => setFinalWaterReading(e.target.value)}
+                                  className="input flex-1"
+                                  placeholder={String(prevWater)}
+                                />
+                                <input
+                                  type="number"
+                                  value={meterWaterRate}
+                                  onChange={(e) => setMeterWaterRate(e.target.value)}
+                                  className="input w-28"
+                                  placeholder="Rate"
+                                />
+                              </div>
+                              <div className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+                                <div>Previous: <span className="font-medium">{prevWater}</span></div>
+                                <div>Usage: <span className="font-semibold">{waterUsage}</span> units</div>
+                                <div>Deduction: <span className="font-semibold text-red-600">{formatCurrency(waterDeduction)}</span></div>
+                              </div>
+                            </div>
+
+                            <div className="p-3 bg-slate-50 dark:bg-zinc-900 rounded-lg">
+                              <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-200 mb-2">Final Electricity Reading</label>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="number"
+                                  value={finalElecReading}
+                                  onChange={(e) => setFinalElecReading(e.target.value)}
+                                  className="input flex-1"
+                                  placeholder={String(prevElec)}
+                                />
+                                <input
+                                  type="number"
+                                  value={meterElecRate}
+                                  onChange={(e) => setMeterElecRate(e.target.value)}
+                                  className="input w-28"
+                                  placeholder="Rate"
+                                />
+                              </div>
+                              <div className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+                                <div>Previous: <span className="font-medium">{prevElec}</span></div>
+                                <div>Usage: <span className="font-semibold">{elecUsage}</span> units</div>
+                                <div>Deduction: <span className="font-semibold text-red-600">{formatCurrency(elecDeduction)}</span></div>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })()}
+                    </div>
             Security Deposits
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">Manage tenant security deposits and refunds</p>
@@ -1065,78 +1134,7 @@ export default function SecurityDeposits() {
                               )}
                             </div>
 
-                              {idx === 0 && (
-                              /* Final Meter Readings (apply deductions from final readings) - improved layout with live calculation */
-                              <div className="mb-6 p-4 bg-white dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-700">
-                                <h3 className="font-semibold text-slate-900 dark:text-zinc-100 mb-3">Final Meter Readings</h3>
-                                <div className="grid grid-cols-1 gap-4">
-                                  {(() => {
-                                    const prevWater = leaseEndTenantBills.find((b: any) => typeof b.water_current_reading === 'number')?.water_current_reading || 0
-                                    const prevElec = leaseEndTenantBills.find((b: any) => typeof b.elec_current_reading === 'number')?.elec_current_reading || 0
-                                    const waterUsage = Math.max(0, (parseFloat(finalWaterReading || '0') || 0) - (parseFloat(prevWater || '0') || 0))
-                                    const elecUsage = Math.max(0, (parseFloat(finalElecReading || '0') || 0) - (parseFloat(prevElec || '0') || 0))
-                                    const waterRateNum = parseFloat(meterWaterRate || '0') || 0
-                                    const elecRateNum = parseFloat(meterElecRate || '0') || 0
-                                    const waterDeduction = Math.max(0, waterUsage * waterRateNum)
-                                    const elecDeduction = Math.max(0, elecUsage * elecRateNum)
-
-                                    return (
-                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div className="p-3 bg-slate-50 dark:bg-zinc-900 rounded-lg">
-                                          <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-200 mb-2">Final Water Reading</label>
-                                          <div className="flex items-center gap-2">
-                                            <input
-                                              type="number"
-                                              value={finalWaterReading}
-                                              onChange={(e) => setFinalWaterReading(e.target.value)}
-                                              className="input flex-1"
-                                              placeholder={String(prevWater)}
-                                            />
-                                            <input
-                                              type="number"
-                                              value={meterWaterRate}
-                                              onChange={(e) => setMeterWaterRate(e.target.value)}
-                                              className="input w-28"
-                                              placeholder="Rate"
-                                            />
-                                          </div>
-                                          <div className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-                                            <div>Previous: <span className="font-medium">{prevWater}</span></div>
-                                            <div>Usage: <span className="font-semibold">{waterUsage}</span> units</div>
-                                            <div>Deduction: <span className="font-semibold text-red-600">{formatCurrency(waterDeduction)}</span></div>
-                                          </div>
-                                        </div>
-
-                                        <div className="p-3 bg-slate-50 dark:bg-zinc-900 rounded-lg">
-                                          <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-200 mb-2">Final Electricity Reading</label>
-                                          <div className="flex items-center gap-2">
-                                            <input
-                                              type="number"
-                                              value={finalElecReading}
-                                              onChange={(e) => setFinalElecReading(e.target.value)}
-                                              className="input flex-1"
-                                              placeholder={String(prevElec)}
-                                            />
-                                            <input
-                                              type="number"
-                                              value={meterElecRate}
-                                              onChange={(e) => setMeterElecRate(e.target.value)}
-                                              className="input w-28"
-                                              placeholder="Rate"
-                                            />
-                                          </div>
-                                          <div className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-                                            <div>Previous: <span className="font-medium">{prevElec}</span></div>
-                                            <div>Usage: <span className="font-semibold">{elecUsage}</span> units</div>
-                                            <div>Deduction: <span className="font-semibold text-red-600">{formatCurrency(elecDeduction)}</span></div>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    )
-                                  })()}
-                                </div>
-                              </div>
-                              )}
+                              
                           </div>
                         </div>
                       ))}
