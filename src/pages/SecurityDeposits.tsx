@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, SecurityDeposit } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Shield, AlertCircle, X, FileText, Loader, Download, Printer } from 'lucide-react'
+import { Shield, AlertCircle, X, FileText, Loader, Download, Printer, Edit2 } from 'lucide-react'
 
 interface SettlementReceipt {
   tenantName: string
@@ -32,6 +32,7 @@ interface SettlementReceipt {
 export default function SecurityDeposits() {
   const [selectedDeposit, setSelectedDeposit] = useState<SecurityDeposit | null>(null)
   const [showLeaseEndModal, setShowLeaseEndModal] = useState(false)
+  const [isEditingLeaseEnd, setIsEditingLeaseEnd] = useState(false)
   const [damagesAmount, setDamagesAmount] = useState('')
   const [damagesDescription, setDamagesDescription] = useState('')
   const [finalWaterReading, setFinalWaterReading] = useState('')
@@ -45,6 +46,20 @@ export default function SecurityDeposits() {
   const [showReceiptModal, setShowReceiptModal] = useState(false)
   const [settlementReceipt, setSettlementReceipt] = useState<SettlementReceipt | null>(null)
   const queryClient = useQueryClient()
+
+  // Load meter rates from settings on component mount
+  useEffect(() => {
+    const stored = localStorage.getItem('app-settings')
+    if (stored) {
+      try {
+        const settings = JSON.parse(stored)
+        if (settings.water_rate) setMeterWaterRate(settings.water_rate.toString())
+        if (settings.elec_rate) setMeterElecRate(settings.elec_rate.toString())
+      } catch (e) {
+        console.warn('Failed to parse settings:', e)
+      }
+    }
+  }, [])
 
   const { data: deposits, error: depositsError, isLoading: depositsLoading } = useQuery({
     queryKey: ['security-deposits'],
@@ -125,12 +140,13 @@ export default function SecurityDeposits() {
   })
 
   const processLeaseEndMutation = useMutation({
-    mutationFn: async ({ depositId, damagesAmount, damagesDescription, meterWaterAmount, meterElecAmount }: { 
+    mutationFn: async ({ depositId, damagesAmount, damagesDescription, meterWaterAmount, meterElecAmount, isEditing }: { 
       depositId: string
       damagesAmount: number
       damagesDescription: string
       meterWaterAmount?: number
       meterElecAmount?: number
+      isEditing?: boolean
     }) => {
       // Get tenant's outstanding balance and arrears
       const { data: depositData } = await supabase
@@ -140,6 +156,19 @@ export default function SecurityDeposits() {
         .single()
 
       if (!depositData) throw new Error('Deposit not found')
+
+      // If editing, delete old meter deductions first
+      if (isEditing) {
+        await supabase
+          .from('security_deposit_deductions')
+          .delete()
+          .eq('security_deposit_id', depositId)
+          .eq('deduction_type', 'other')
+          .in('description', [
+            'Final water meter deduction at lease end',
+            'Final electricity meter deduction at lease end'
+          ])
+      }
 
       // Calculate total arrears
       const { data: billsData } = await supabase
@@ -364,7 +393,44 @@ export default function SecurityDeposits() {
   const handleProcessLeaseEnd = (deposit: SecurityDeposit) => {
     setSelectedDeposit(deposit)
     setShowLeaseEndModal(true)
+    setIsEditingLeaseEnd(false)
     setError(null)
+    setFinalWaterReading('')
+    setFinalElecReading('')
+    // Reset meter rates to current settings
+    const stored = localStorage.getItem('app-settings')
+    if (stored) {
+      try {
+        const settings = JSON.parse(stored)
+        setMeterWaterRate(settings.water_rate?.toString() || '50')
+        setMeterElecRate(settings.elec_rate?.toString() || '15')
+      } catch (e) {
+        setMeterWaterRate('50')
+        setMeterElecRate('15')
+      }
+    }
+    loadTenantBills(deposit.tenant_id)
+  }
+
+  const handleEditProcessedLeaseEnd = (deposit: SecurityDeposit) => {
+    setSelectedDeposit(deposit)
+    setShowLeaseEndModal(true)
+    setIsEditingLeaseEnd(true)
+    setError(null)
+    setFinalWaterReading('')
+    setFinalElecReading('')
+    // Reset meter rates to current settings
+    const stored = localStorage.getItem('app-settings')
+    if (stored) {
+      try {
+        const settings = JSON.parse(stored)
+        setMeterWaterRate(settings.water_rate?.toString() || '50')
+        setMeterElecRate(settings.elec_rate?.toString() || '15')
+      } catch (e) {
+        setMeterWaterRate('50')
+        setMeterElecRate('15')
+      }
+    }
     loadTenantBills(deposit.tenant_id)
   }
 
@@ -405,7 +471,8 @@ export default function SecurityDeposits() {
       damagesAmount: parseFloat(damagesAmount) || 0,
       damagesDescription: damagesDescription,
       meterWaterAmount: waterDeduction,
-      meterElecAmount: elecDeduction
+      meterElecAmount: elecDeduction,
+      isEditing: isEditingLeaseEnd
     })
   }
 
@@ -935,13 +1002,22 @@ export default function SecurityDeposits() {
                           </button>
                         )}
                         {(deposit.status === 'refunded' || deposit.status === 'forfeited') && (
-                          <button
-                            onClick={() => handleViewProcessedReceipt(deposit)}
-                            className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded transition-all"
-                            title="View Settlement Receipt"
-                          >
-                            <Download size={14} />
-                          </button>
+                          <>
+                            <button
+                              onClick={() => handleEditProcessedLeaseEnd(deposit)}
+                              className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-all"
+                              title="Edit Lease End Settlement"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleViewProcessedReceipt(deposit)}
+                              className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded transition-all"
+                              title="View Settlement Receipt"
+                            >
+                              <Download size={14} />
+                            </button>
+                          </>
                         )}
                         <button
                           onClick={() => setSelectedDeposit(deposit)}
@@ -985,7 +1061,7 @@ export default function SecurityDeposits() {
               <div className="flex items-start justify-between mb-6">
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mb-2">
-                    Process Lease End
+                    {isEditingLeaseEnd ? 'Edit' : 'Process'} Lease End
                   </h2>
                   <p className="text-sm text-slate-600 dark:text-zinc-400">
                     Final settlement for {selectedDeposit.tenants?.name || 'tenant'}
