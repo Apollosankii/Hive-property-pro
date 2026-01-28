@@ -338,7 +338,8 @@ export default function SecurityDeposits() {
       if (selectedDeposit) {
         const totalBalance = leaseEndTenantBills.reduce((sum: number, bill: any) => sum + (bill.balance || 0), 0)
         const depositAmount = selectedDeposit.amount || 0
-        const existingDeductions = selectedDeposit.total_deductions || 0
+        // When editing, don't show previous deductions in receipt
+        const existingDeductions = isEditingLeaseEnd ? 0 : (selectedDeposit.total_deductions || 0)
         const newDamagesAmount = parseFloat(damagesAmount) || 0
         const newMeterWater = parseFloat((parseFloat(meterWaterRate || '0') && finalWaterReading) ? ((parseFloat(finalWaterReading) - (leaseEndTenantBills[0]?.water_current_reading || 0)) * parseFloat(meterWaterRate || '0')).toString() : '0') || 0
         const newMeterElec = parseFloat((parseFloat(meterElecRate || '0') && finalElecReading) ? ((parseFloat(finalElecReading) - (leaseEndTenantBills[0]?.elec_current_reading || 0)) * parseFloat(meterElecRate || '0')).toString() : '0') || 0
