@@ -1088,6 +1088,15 @@ export default function SecurityDeposits() {
                 </button>
               </div>
 
+              {isEditingLeaseEnd && (
+                <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/50 rounded-lg flex items-start gap-3">
+                  <AlertCircle className="text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" size={18} />
+                  <div className="text-sm text-blue-700 dark:text-blue-300">
+                    You are editing this settlement. Previous deductions will be recalculated based on your new figures.
+                  </div>
+                </div>
+              )}
+
               {error && (
                 <div className="mb-4 p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/50 rounded-xl flex items-start gap-3">
                   <AlertCircle className="text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" size={20} />
@@ -1241,7 +1250,8 @@ export default function SecurityDeposits() {
                 {(() => {
                   const totalBalance = leaseEndTenantBills.reduce((sum: number, bill: any) => sum + (bill.balance || 0), 0)
                   const depositAmount = selectedDeposit.amount || 0
-                  const existingDeductions = selectedDeposit.total_deductions || 0
+                  // When editing, start fresh without existing deductions
+                  const existingDeductions = isEditingLeaseEnd ? 0 : (selectedDeposit.total_deductions || 0)
                   const newDamagesAmount = parseFloat(damagesAmount) || 0
                   // previous readings
                   const prevWater = leaseEndTenantBills.find((b: any) => typeof b.water_current_reading === 'number')?.water_current_reading || 0
@@ -1264,10 +1274,12 @@ export default function SecurityDeposits() {
                         <span className="text-slate-600 dark:text-slate-400">Deposit Amount:</span>
                         <span className="font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(depositAmount)}</span>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-600 dark:text-slate-400">Existing Deductions:</span>
-                        <span className="font-semibold text-red-600 dark:text-red-400">{formatCurrency(existingDeductions)}</span>
-                      </div>
+                      {!isEditingLeaseEnd && (
+                        <div className="flex justify-between">
+                          <span className="text-slate-600 dark:text-slate-400">Existing Deductions:</span>
+                          <span className="font-semibold text-red-600 dark:text-red-400">{formatCurrency(existingDeductions)}</span>
+                        </div>
+                      )}
                       {totalBalance !== 0 && (
                         <div className={`p-2 rounded ${totalBalance < 0 ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800' : ''}`}>
                           <div className="flex justify-between">
