@@ -26,18 +26,33 @@ export default function Payments() {
   const queryClient = useQueryClient()
 
   const { data: pendingBills, error: pendingBillsError, isLoading: pendingBillsLoading } = useQuery({
-    queryKey: ['pending-bills'],
+    queryKey: ['pending-bills', selectedMonth],
     queryFn: async () => {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) {
         console.warn('No session found, queries may fail due to RLS')
       }
 
-      // Fetch bills first
+      // Compute month range (start inclusive, nextMonth exclusive)
+      const parts = selectedMonth.split('-').map(Number)
+      const py = parts[0]
+      const pm = parts[1]
+      let ny = py
+      let nm = pm + 1
+      if (nm > 12) {
+        nm = 1
+        ny = py + 1
+      }
+      const startDate = `${py}-${String(pm).padStart(2, '0')}-01`
+      const nextMonthFirst = `${ny}-${String(nm).padStart(2, '0')}-01`
+
+      // Fetch bills first - filter by current month only
       const { data: billsData, error: billsError } = await supabase
         .from('bills')
         .select('*')
         .neq('status', 'paid')
+        .gte('billing_month', startDate)
+        .lt('billing_month', nextMonthFirst)
         .order('created_at', { ascending: false })
       
       if (billsError) {
@@ -46,7 +61,7 @@ export default function Payments() {
       }
       
       if (!billsData || billsData.length === 0) {
-        console.log('No pending bills found')
+        console.log('No pending bills found for this month')
         return []
       }
       
