@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, SecurityDeposit } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { exportElementToPDF } from '@/lib/pdf'
+import { exportElementToPDF, generateLeaseEndSettlementPDF } from '@/lib/pdf'
 import { Shield, AlertCircle, X, FileText, Loader, Download, Printer, Edit2 } from 'lucide-react'
 
 interface SettlementReceipt {
@@ -846,18 +846,8 @@ export default function SecurityDeposits() {
   const handleDownloadReceiptPDF = async () => {
     if (!settlementReceipt) return
     
-    // Temporarily adjust the receipt element for full capture
-    const element = document.getElementById('settlement-receipt-content')
-    if (element) {
-      const originalClass = element.className
-      element.className = element.className.replace('max-h-[50vh] overflow-y-auto', '')
-      
-      const filename = `lease-settlement-${settlementReceipt.tenantName.replace(/\s+/g, '-')}-${new Date().toISOString().split('T')[0]}.pdf`
-      await exportElementToPDF('settlement-receipt-content', filename)
-      
-      // Restore original class
-      element.className = originalClass
-    }
+    const filename = `lease-settlement-${settlementReceipt.tenantName.replace(/\s+/g, '-')}-${new Date().toISOString().split('T')[0]}.pdf`
+    generateLeaseEndSettlementPDF(settlementReceipt, filename)
   }
 
   const handleViewProcessedReceipt = async (deposit: SecurityDeposit) => {

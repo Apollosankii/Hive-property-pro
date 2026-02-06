@@ -2,11 +2,13 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, Payment } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Download, DollarSign } from 'lucide-react'
+import { Plus, Download, DollarSign, CheckCircle } from 'lucide-react'
 import { generateReceiptPDF } from '@/lib/pdf'
 
 export default function Payments() {
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [showSuccessAlert, setShowSuccessAlert] = useState(false)
+  const [successMessage, setSuccessMessage] = useState('')
   const [search, setSearch] = useState('')
   const [billId, setBillId] = useState('')
   const [filterType, setFilterType] = useState<'unit' | 'tenant'>('unit')
@@ -379,7 +381,7 @@ export default function Payments() {
 
       return payment
     },
-    onSuccess: async () => {
+    onSuccess: async (payment) => {
       // Invalidate all queries that depend on payments or bills
       await queryClient.invalidateQueries({ queryKey: ['payments'] })
       await queryClient.invalidateQueries({ queryKey: ['pending-bills'] })
@@ -389,17 +391,30 @@ export default function Payments() {
       await queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
       await queryClient.invalidateQueries({ queryKey: ['tenants'] })
       
-      // Refetch to ensure UI updates immediately
-      await queryClient.refetchQueries({ queryKey: ['payments'] })
-      await queryClient.refetchQueries({ queryKey: ['recent-payments'] })
-      await queryClient.refetchQueries({ queryKey: ['pending-bills'] })
-      await queryClient.refetchQueries({ queryKey: ['bills'] })
-      await queryClient.refetchQueries({ queryKey: ['arrears-report'] })
-      await queryClient.refetchQueries({ queryKey: ['revenue-report'] })
-      await queryClient.refetchQueries({ queryKey: ['dashboard-stats'] })
+      // Wait for critical queries to refetch before closing modal
+      // This ensures the bill list is updated with fresh data
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ['pending-bills'], type: 'active' }),
+        queryClient.refetchQueries({ queryKey: ['bills'], type: 'active' }),
+        queryClient.refetchQueries({ queryKey: ['payments'], type: 'active' })
+      ])
       
+      // Show success message
+      const bill = pendingBills?.find((b: any) => b.id === billId)
+      if (bill && payment) {
+        setSuccessMessage(`Payment of ${formatCurrency(payment.amount)} recorded successfully for ${bill.tenants?.name}`)
+        setShowSuccessAlert(true)
+        
+        // Auto-hide success message after 4 seconds
+        setTimeout(() => setShowSuccessAlert(false), 4000)
+      }
+      
+      // After refetch completes, close modal and reset form
       setIsModalOpen(false)
       resetForm()
+      
+      // Clear selected bill to prevent showing stale data
+      setBillId('')
     },
     onError: (error: any) => {
       console.error('Failed to create payment:', error)
@@ -448,6 +463,17 @@ export default function Payments() {
 
   return (
     <div className="space-y-4 animate-fade-in w-full max-w-full overflow-x-hidden">
+      {/* Success Alert */}
+      {showSuccessAlert && (
+        <div className="p-4 bg-green-50 border border-green-200 rounded-xl flex items-start gap-3">
+          <CheckCircle className="text-green-600 flex-shrink-0 mt-0.5" size={20} />
+          <div>
+            <p className="font-semibold text-green-900">Payment Recorded Successfully</p>
+            <p className="text-sm text-green-700 mt-1">{successMessage}</p>
+          </div>
+        </div>
+      )}
+      
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 dark:from-slate-100 dark:to-slate-300 bg-clip-text text-transparent">
@@ -465,6 +491,8 @@ export default function Payments() {
           />
           <button
             onClick={() => {
+              // Force refetch of fresh bill data before opening modal
+              queryClient.refetchQueries({ queryKey: ['pending-bills'] })
               setIsModalOpen(true)
               resetForm()
             }}
@@ -653,13 +681,27 @@ export default function Payments() {
                   ) : null}
                 </select>
                 {selectedBill && (
-                  <div className="mt-3 p-4 bg-slate-50 rounded-xl border border-slate-200 text-sm">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-slate-600 font-medium">Total:</span>
-                      <span className="font-bold text-slate-900">{formatCurrency(selectedBill.total_amount)}</span>
+                  <div className="mt-3 p-4 bg-slate-50 rounded-xl border border-slate-200 text-sm space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-600 font-medium">Billing Month:</span>
+                      <span className="font-bold text-slate-900">{selectedBill.billing_month || 'N/A'}</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-slate-600 font-medium">Balance:</span>
+                      <span className="text-slate-600 font-medium">Total Bill:</span>
+                      <span className="font-bold text-slate-900">{formatCurrency(selectedBill.total_amount)}</span>
+                    </div>
+                    {selectedBill.arrears_brought_forward > 0 && (
+                      <div className="flex justify-between items-center text-orange-600">
+                        <span className="font-medium">Arrears:</span>
+                        <span className="font-bold">{formatCurrency(selectedBill.arrears_brought_forward)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center pt-2 border-t border-slate-300">
+                      <span className="text-slate-700 font-semibold">Paid:</span>
+                      <span className="font-bold text-slate-900">{formatCurrency(selectedBill.amount_paid || 0)}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-700 font-semibold">Outstanding:</span>
                       <span className="font-bold text-red-600">
                         {formatCurrency(selectedBill.balance)}
                       </span>
