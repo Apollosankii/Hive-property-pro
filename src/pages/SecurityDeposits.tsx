@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, SecurityDeposit } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { exportElementToPDF, generateLeaseEndSettlementPDF } from '@/lib/pdf'
+import { generateLeaseEndSettlementPDF } from '@/lib/pdf'
 import { Shield, AlertCircle, X, FileText, Loader, Download, Printer, Edit2 } from 'lucide-react'
 
 interface SettlementReceipt {

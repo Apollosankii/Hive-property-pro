@@ -382,7 +382,6 @@ export function generateLeaseEndSettlementPDF(receipt: any, filename: string) {
     doc.setTextColor(255, 255, 255)
     doc.setFillColor(30, 64, 175)
     
-    const colWidths = [40, 25, 25, 25, 35]
     const row1X = [leftMargin, leftMargin + 40, leftMargin + 65, leftMargin + 90, leftMargin + 115]
     
     doc.rect(leftMargin, yPos - 4, contentWidth, 6, 'F')
