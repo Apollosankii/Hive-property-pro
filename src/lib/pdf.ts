@@ -24,8 +24,27 @@ export async function generateReceiptPDF(payment: any) {
   yPos += 7
   doc.text(`Amount: ${formatCurrency(payment.amount)}`, 20, yPos)
   yPos += 7
-  doc.text(`Payment Method: ${payment.payment_method.toUpperCase()}`, 20, yPos)
-  yPos += 7
+  // Payment method may come from the payment object or from app settings
+  const stored = localStorage.getItem('app-settings')
+  let settings: any = null
+  try { settings = stored ? JSON.parse(stored) : null } catch (e) { settings = null }
+  const method = (payment.payment_method || settings?.payment_method || '').toString()
+  const paybill = payment.paybill || settings?.paybill || ''
+  const acc = payment.account_number || settings?.account_number || ''
+
+  if (method) {
+    doc.text(`Payment Method: ${method.toUpperCase()}`, 20, yPos)
+    yPos += 7
+  }
+  if (paybill) {
+    doc.text(`Paybill: ${paybill}`, 20, yPos)
+    yPos += 7
+  }
+  if (acc) {
+    doc.text(`Account: ${acc}`, 20, yPos)
+    yPos += 7
+  }
+
   if (payment.notes) {
     doc.text(`Notes: ${payment.notes}`, 20, yPos)
   }
@@ -126,6 +145,36 @@ export async function generateInvoicePDF(bill: any) {
   doc.setFont('helvetica', 'bold')
   doc.text(`Balance Due: ${formatCurrency(bill.balance)}`, 20, yPos)
   
+  // Payment instructions: read from app-settings if present
+  const stored = localStorage.getItem('app-settings')
+  let settings: any = null
+  try { settings = stored ? JSON.parse(stored) : null } catch (e) { settings = null }
+  const method = settings?.payment_method || ''
+  const paybill = settings?.paybill || ''
+  const acc = settings?.account_number || ''
+
+  if (method || paybill || acc) {
+    yPos += 10
+    doc.setFontSize(11)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Payment Options', 20, yPos)
+    yPos += 6
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    if (method) {
+      doc.text(`Method: ${method}`, 20, yPos)
+      yPos += 6
+    }
+    if (paybill) {
+      doc.text(`Paybill: ${paybill}`, 20, yPos)
+      yPos += 6
+    }
+    if (acc) {
+      doc.text(`Account: ${acc}`, 20, yPos)
+      yPos += 6
+    }
+  }
+
   // Footer
   doc.setFontSize(8)
   doc.setFont('helvetica', 'normal')
@@ -139,7 +188,10 @@ export async function generateBulkInvoicesPDF(bills: any[]) {
   if (bills.length === 0) return
   
   const doc = new jsPDF()
-  
+  const storedSettings = localStorage.getItem('app-settings')
+  let appSettings: any = null
+  try { appSettings = storedSettings ? JSON.parse(storedSettings) : null } catch (e) { appSettings = null }
+
   bills.forEach((bill, index) => {
     if (index > 0) {
       doc.addPage()
@@ -238,7 +290,34 @@ export async function generateBulkInvoicesPDF(bills: any[]) {
     
     doc.setFont('helvetica', 'bold')
     doc.text(`Balance Due: ${formatCurrency(bill.balance)}`, 20, yPos)
-    
+
+    // Payment instructions from app settings (if present)
+    const method = appSettings?.payment_method || ''
+    const paybill = appSettings?.paybill || ''
+    const acc = appSettings?.account_number || ''
+
+    if (method || paybill || acc) {
+      yPos += 10
+      doc.setFontSize(11)
+      doc.setFont('helvetica', 'bold')
+      doc.text('Payment Options', 20, yPos)
+      yPos += 6
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(10)
+      if (method) {
+        doc.text(`Method: ${method}`, 20, yPos)
+        yPos += 6
+      }
+      if (paybill) {
+        doc.text(`Paybill: ${paybill}`, 20, yPos)
+        yPos += 6
+      }
+      if (acc) {
+        doc.text(`Account: ${acc}`, 20, yPos)
+        yPos += 6
+      }
+    }
+
     // Footer
     doc.setFontSize(8)
     doc.setFont('helvetica', 'normal')

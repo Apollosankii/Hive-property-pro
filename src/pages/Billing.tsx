@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatMonth } from '@/lib/utils'
@@ -49,6 +49,13 @@ export default function Billing() {
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [showImportModal, setShowImportModal] = useState(false)
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [paymentFormData, setPaymentFormData] = useState({
+    payment_method: '',
+    paybill: '',
+    account_number: '',
+  })
+
   const [importFile, setImportFile] = useState<File | null>(null)
   const [importProgress, setImportProgress] = useState(0)
   const [importMessage, setImportMessage] = useState('')
@@ -56,6 +63,36 @@ export default function Billing() {
   const [showExportModal, setShowExportModal] = useState(false)
   const [exportBillsToUse, setExportBillsToUse] = useState<any[]>([])
   const queryClient = useQueryClient()
+
+  useEffect(() => {
+    const stored = localStorage.getItem('app-settings')
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored)
+        setPaymentFormData({
+          payment_method: parsed.payment_method || '',
+          paybill: parsed.paybill || '',
+          account_number: parsed.account_number || '',
+        })
+      } catch (e) {
+        // ignore
+      }
+    }
+  }, [])
+
+  const savePaymentSettings = () => {
+    try {
+      const stored = localStorage.getItem('app-settings')
+      const parsed = stored ? JSON.parse(stored) : {}
+      const merged = { ...parsed, ...paymentFormData }
+      localStorage.setItem('app-settings', JSON.stringify(merged))
+      setShowPaymentModal(false)
+    } catch (e) {
+      console.error('Failed to save payment settings', e)
+      alert('Failed to save payment settings')
+    }
+  }
+
 
   // Helper: sync the bill status using fresh DB-calculated values
   const syncBillStatus = async (billId: string) => {
@@ -1192,6 +1229,16 @@ export default function Billing() {
               </span>
             )}
           </button>
+          <button
+            onClick={() => setShowPaymentModal(true)}
+            className="btn btn-secondary"
+            title="Payment Info (paybill/account)"
+          >
+            <Receipt size={18} />
+            <span className="hidden sm:inline">Payment Info</span>
+            <span className="sm:hidden">PayInfo</span>
+          </button>
+
           <button
             onClick={() => setShowImportModal(true)}
             className="btn btn-secondary"
@@ -2489,6 +2536,74 @@ export default function Billing() {
                   >
                     <FileSpreadsheet size={18} />
                     Import Bills
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPaymentModal && (
+        <div className="modal-overlay" onClick={() => { setShowPaymentModal(false) }}>
+          <div className="modal-content max-w-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6">
+              <h2 className="text-2xl font-bold text-slate-900 mb-2">Payment Details</h2>
+              <p className="text-sm text-slate-600 mb-4">Set default payment method, paybill and account number to appear on generated invoices and receipts.</p>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Payment Method</label>
+                  <select
+                    value={paymentFormData.payment_method}
+                    onChange={(e) => setPaymentFormData(prev => ({ ...prev, payment_method: e.target.value }))}
+                    className="input"
+                  >
+                    <option value="">Select method</option>
+                    <option value="M-PESA">M-PESA</option>
+                    <option value="Airtel Money">Airtel Money</option>
+                    <option value="Bank Transfer">Bank Transfer</option>
+                    <option value="Cash">Cash</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Paybill</label>
+                  <input
+                    type="text"
+                    value={paymentFormData.paybill}
+                    onChange={(e) => setPaymentFormData(prev => ({ ...prev, paybill: e.target.value }))}
+                    className="input"
+                    placeholder="e.g. 123456"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Account Number / Description</label>
+                  <input
+                    type="text"
+                    value={paymentFormData.account_number}
+                    onChange={(e) => setPaymentFormData(prev => ({ ...prev, account_number: e.target.value }))}
+                    className="input"
+                    placeholder="e.g. ACC-1001 or tenant name"
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-4 border-t border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setShowPaymentModal(false)}
+                    className="flex-1 btn btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={savePaymentSettings}
+                    className="flex-1 btn btn-primary"
+                  >
+                    Save
                   </button>
                 </div>
               </div>
