@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { ToastProvider } from '@/components/ToastProvider'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
 import { useThemeStore } from '@/store/themeStore'
@@ -163,7 +164,8 @@ function App() {
   }, [setUser, setLoading, isDark, setTheme])
 
   return (
-    <BrowserRouter>
+    <ToastProvider>
+      <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
@@ -223,7 +225,8 @@ function App() {
           }
         />
       </Routes>
-    </BrowserRouter>
+      </BrowserRouter>
+    </ToastProvider>
   )
 }
 

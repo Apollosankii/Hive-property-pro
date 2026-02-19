@@ -3,10 +3,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate, formatMonth } from '@/lib/utils'
 import { ArrowLeft, User, Phone, Mail, Home, Receipt, CreditCard, Calendar, AlertCircle, X } from 'lucide-react'
+import useToast from '@/hooks/useToast'
 
 export default function TenantDetail() {
   const { id } = useParams<{ id: string }>()
   const queryClient = useQueryClient()
+  const toast = useToast()
 
   const { data: tenant } = useQuery({
     queryKey: ['tenant', id],
@@ -317,7 +319,7 @@ export default function TenantDetail() {
                           if (error) throw error
                           await queryClient.invalidateQueries({ queryKey: ['tenant-bills', id] })
                         } catch (err: any) {
-                          alert(err.message || 'Failed to delete bill')
+                          toast.error(err.message || 'Failed to delete bill')
                         }
                       }}
                       className="p-1.5 text-red-600 hover:bg-red-50 rounded"

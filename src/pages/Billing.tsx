@@ -6,6 +6,7 @@ import { generateInvoicePDF, generateBulkInvoicesPDF } from '@/lib/pdf'
 import { exportBillsToExcel } from '@/lib/excel'
 import { importBillsFromFile } from '@/lib/excel-import'
 import ExportColumnsModal from '@/components/ExportColumnsModal'
+import useToast from '@/hooks/useToast'
 import { Plus, Calendar, CheckCircle, Receipt, Edit, FileText, AlertCircle, X, Printer, FileSpreadsheet, Upload } from 'lucide-react'
 
 export default function Billing() {
@@ -63,6 +64,27 @@ export default function Billing() {
   const [showExportModal, setShowExportModal] = useState(false)
   const [exportBillsToUse, setExportBillsToUse] = useState<any[]>([])
   const queryClient = useQueryClient()
+  const toast = useToast()
+
+  // Map database/Supabase errors to clear, user-friendly messages
+  const friendlyErrorMessage = (err: any, defaultMsg?: string) => {
+    if (!err) return defaultMsg || 'An unexpected error occurred. Please try again.'
+    const text = (err.message || err.error_description || err.details || '').toString()
+    const code = (err.code || err.status || '')
+
+    // Unique constraint / duplicate entry
+    if (/23505|duplicate|unique|violates unique|already exists/i.test(text) || /23505/.test(String(code))) {
+      return 'A bill for that unit and month already exists. To modify it, open the existing bill from the list.'
+    }
+
+    // Permission / RLS issues
+    if (/permission denied|forbidden|not authorized|authentication/i.test(text)) {
+      return 'Permission denied. Please check your login and account permissions.'
+    }
+
+    // Fallback to the server-provided message when safe, else a generic message
+    return text || defaultMsg || 'An unexpected error occurred. Please try again.'
+  }
 
   useEffect(() => {
     const stored = localStorage.getItem('app-settings')
@@ -89,7 +111,7 @@ export default function Billing() {
       setShowPaymentModal(false)
     } catch (e) {
       console.error('Failed to save payment settings', e)
-      alert('Failed to save payment settings')
+      toast.error('Failed to save payment settings')
     }
   }
 
@@ -552,18 +574,19 @@ export default function Billing() {
     onError: (error: any) => {
       console.error('Failed to generate bills:', error)
       setIsGenerating(false)
-      alert(error.message || 'Failed to generate bills. Please check your Supabase configuration.')
+      const msg = friendlyErrorMessage(error, 'Failed to generate bills. Please try again.')
+      toast.error(msg)
     },
   })
 
   const handleGenerateBills = () => {
     if (occupiedUnitsError) {
-      alert(`Error loading occupied units: ${occupiedUnitsError.message || 'Please check your Supabase configuration and ensure you are logged in.'}`)
+      toast.error(`Error loading occupied units: ${occupiedUnitsError.message || 'Please check your Supabase configuration and ensure you are logged in.'}`)
       return
     }
     
     if (!occupiedUnits || occupiedUnits.length === 0) {
-      alert('No occupied units found. Please assign tenants to units first.')
+      toast.info('No occupied units found. Please assign tenants to units first.')
       return
     }
 
@@ -645,7 +668,7 @@ export default function Billing() {
     },
     onError: (error: any) => {
       console.error('Failed to update bill:', error)
-      setError(error.message || 'Failed to update bill. Please check your Supabase configuration.')
+      setError(friendlyErrorMessage(error, 'Failed to update bill.'))
     },
   })
 
@@ -687,7 +710,7 @@ export default function Billing() {
     },
     onError: (error: any) => {
       console.error('Failed to create bill:', error)
-      setError(error.message || 'Failed to create bill. Please check your Supabase configuration.')
+      setError(friendlyErrorMessage(error, 'Failed to create bill.'))
     },
   })
 
@@ -729,7 +752,7 @@ export default function Billing() {
     },
     onError: (error: any) => {
       console.error('Failed to create utility bill:', error)
-      setError(error.message || 'Failed to create utility bill. Please check your Supabase configuration.')
+      setError(friendlyErrorMessage(error, 'Failed to create utility bill.'))
     },
   })
 
@@ -954,7 +977,7 @@ export default function Billing() {
       .single()
     
     if (insertError) {
-      setError(insertError.message || 'Failed to create bill')
+      setError(friendlyErrorMessage(insertError, 'Failed to create bill'))
       return
     }
 
@@ -1464,7 +1487,7 @@ export default function Billing() {
                                   if (error) throw error
                                   await queryClient.invalidateQueries({ queryKey: ['bills', selectedMonth] })
                                 } catch (err: any) {
-                                  alert(err.message || 'Failed to delete bill')
+                                  toast.error(err.message || 'Failed to delete bill')
                                 }
                               }}
                               className="p-1 text-slate-600 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-all"
