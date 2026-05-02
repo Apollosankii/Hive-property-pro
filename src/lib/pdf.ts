@@ -24,6 +24,14 @@ export async function generateReceiptPDF(payment: any) {
   yPos += 7
   doc.text(`Amount: ${formatCurrency(payment.amount)}`, 20, yPos)
   yPos += 7
+  if (payment.bills?.billing_month) {
+    doc.text(
+      `Billing month credited: ${new Date(payment.bills.billing_month).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`,
+      20,
+      yPos
+    )
+    yPos += 7
+  }
   // Payment method may come from the payment object or from app settings
   const stored = localStorage.getItem('app-settings')
   let settings: any = null

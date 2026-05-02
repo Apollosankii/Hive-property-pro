@@ -1,25 +1,120 @@
-import { useState } from 'react'
+import { useState, useMemo, useCallback, useEffect, type FormEvent } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase, Payment } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Plus, Download, DollarSign, CheckCircle } from 'lucide-react'
 import { generateReceiptPDF } from '@/lib/pdf'
+
+function billingMonthKey(billingMonth: string): string {
+  const d = new Date(billingMonth)
+  if (Number.isNaN(d.getTime())) return billingMonth.slice(0, 7)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+function nextCalendarMonth(yyyyMm: string): string {
+  const [y, m] = yyyyMm.split('-').map(Number)
+  let nm = m + 1
+  let ny = y
+  if (nm > 12) {
+    nm = 1
+    ny += 1
+  }
+  return `${ny}-${String(nm).padStart(2, '0')}`
+}
+
+type ApplyPaymentParams = {
+  targetBillId: string
+  unitId: string
+  tenantId: string
+  amount: number
+  paymentMethod: 'cash' | 'mpesa' | 'bank'
+  receiptUrl?: string
+  notes?: string
+  paymentDate?: string
+}
+
+async function applyPaymentToBill(params: ApplyPaymentParams) {
+  const { data: billRow, error: fetchErr } = await supabase
+    .from('bills')
+    .select('amount_paid')
+    .eq('id', params.targetBillId)
+    .single()
+
+  if (fetchErr || !billRow) {
+    throw fetchErr || new Error('Bill not found')
+  }
+
+  const { data: payment, error: paymentError } = await supabase
+    .from('payments')
+    .insert([
+      {
+        bill_id: params.targetBillId,
+        unit_id: params.unitId,
+        tenant_id: params.tenantId,
+        amount: params.amount,
+        payment_method: params.paymentMethod,
+        receipt_url: params.receiptUrl,
+        payment_date: params.paymentDate ?? new Date().toISOString(),
+        notes: params.notes,
+      },
+    ])
+    .select()
+    .single()
+
+  if (paymentError) throw paymentError
+
+  const newAmountPaid = (billRow.amount_paid || 0) + params.amount
+  const { error: billError } = await supabase
+    .from('bills')
+    .update({ amount_paid: newAmountPaid })
+    .eq('id', params.targetBillId)
+
+  if (billError) throw billError
+
+  const { data: freshBill, error: freshError } = await supabase
+    .from('bills')
+    .select('total_amount, amount_paid, balance, status')
+    .eq('id', params.targetBillId)
+    .single()
+
+  if (!freshError && freshBill) {
+    const total = freshBill.total_amount || 0
+    const paid = freshBill.amount_paid || 0
+    const balance = typeof freshBill.balance === 'number' ? freshBill.balance : total - paid
+    const EPS = 0.0001
+    const computedStatus = balance <= EPS ? 'paid' : paid > 0 ? 'partial' : 'pending'
+
+    if (computedStatus !== freshBill.status) {
+      const { error: statusErr } = await supabase
+        .from('bills')
+        .update({ status: computedStatus })
+        .eq('id', params.targetBillId)
+      if (statusErr) console.warn('Failed to sync bill status:', statusErr)
+    }
+  }
+
+  return payment
+}
 
 export default function Payments() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [showSuccessAlert, setShowSuccessAlert] = useState(false)
   const [successMessage, setSuccessMessage] = useState('')
   const [search, setSearch] = useState('')
-  const [billId, setBillId] = useState('')
   const [filterType, setFilterType] = useState<'unit' | 'tenant'>('unit')
   const [selectedEntityId, setSelectedEntityId] = useState('')
+  const [selectedBuildingId, setSelectedBuildingId] = useState('')
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date()
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   })
   const [unitsList, setUnitsList] = useState<any[]>([])
   const [tenantsList, setTenantsList] = useState<any[]>([])
-  const [amount, setAmount] = useState('')
+  const [paymentMode, setPaymentMode] = useState<'current' | 'advance'>('current')
+  const [advanceTargetMonth, setAdvanceTargetMonth] = useState('')
+  const [selectedBillIds, setSelectedBillIds] = useState<string[]>([])
+  const [rowAmounts, setRowAmounts] = useState<Record<string, string>>({})
+  const [fillAllValue, setFillAllValue] = useState('')
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'mpesa' | 'bank'>('cash')
   const [receiptFile, setReceiptFile] = useState<File | null>(null)
   const [notes, setNotes] = useState('')
@@ -33,7 +128,6 @@ export default function Payments() {
         console.warn('No session found, queries may fail due to RLS')
       }
 
-      // Compute month range (start inclusive, nextMonth exclusive)
       const parts = selectedMonth.split('-').map(Number)
       const py = parts[0]
       const pm = parts[1]
@@ -46,7 +140,6 @@ export default function Payments() {
       const startDate = `${py}-${String(pm).padStart(2, '0')}-01`
       const nextMonthFirst = `${ny}-${String(nm).padStart(2, '0')}-01`
 
-      // Fetch bills first - filter by current month only
       const { data: billsData, error: billsError } = await supabase
         .from('bills')
         .select('*')
@@ -54,18 +147,17 @@ export default function Payments() {
         .gte('billing_month', startDate)
         .lt('billing_month', nextMonthFirst)
         .order('created_at', { ascending: false })
-      
+
       if (billsError) {
         console.error('Pending bills query error:', billsError)
         throw billsError
       }
-      
+
       if (!billsData || billsData.length === 0) {
         console.log('No pending bills found for this month')
         return []
       }
-      
-      // Fetch units and tenants separately
+
       const billsWithRelations = await Promise.all(
         billsData.map(async (bill: any) => {
           const [unitRes, tenantRes] = await Promise.all([
@@ -82,10 +174,9 @@ export default function Payments() {
                   .select('name, phone')
                   .eq('id', bill.tenant_id)
                   .single()
-              : Promise.resolve({ data: null, error: null })
+              : Promise.resolve({ data: null, error: null }),
           ])
-          
-          // Get building name
+
           let buildingName = null
           if (unitRes.data?.building_id) {
             const { data: buildingData } = await supabase
@@ -93,23 +184,28 @@ export default function Payments() {
               .select('name')
               .eq('id', unitRes.data.building_id)
               .single()
-            
+
             buildingName = buildingData?.name || null
           }
-          
+
           return {
             ...bill,
-            units: unitRes.data ? {
-              unit_number: unitRes.data.unit_number,
-              buildings: buildingName ? { name: buildingName } : null
-            } : null,
-            tenants: tenantRes.data ? { name: tenantRes.data.name, phone: tenantRes.data.phone } : null
+            building_id: unitRes.data?.building_id ?? null,
+            units: unitRes.data
+              ? {
+                  unit_number: unitRes.data.unit_number,
+                  building_id: unitRes.data.building_id,
+                  buildings: buildingName ? { name: buildingName } : null,
+                }
+              : null,
+            tenants: tenantRes.data ? { name: tenantRes.data.name, phone: tenantRes.data.phone } : null,
           }
         })
       )
-      
-      // Sort bills descending by unit number to avoid confusion when selecting
-      billsWithRelations.sort((a: any, b: any) => (b.units?.unit_number || '').toString().localeCompare((a.units?.unit_number || '').toString()))
+
+      billsWithRelations.sort((a: any, b: any) =>
+        (b.units?.unit_number || '').toString().localeCompare((a.units?.unit_number || '').toString())
+      )
 
       return billsWithRelations
     },
@@ -118,7 +214,35 @@ export default function Payments() {
     refetchOnWindowFocus: true,
   })
 
-  
+  const pendingBillsForBuilding = useMemo(() => {
+    if (!pendingBills?.length) return []
+    if (!selectedBuildingId) return pendingBills
+    return pendingBills.filter((b: any) => b.building_id === selectedBuildingId)
+  }, [pendingBills, selectedBuildingId])
+
+  const pendingUnitIds = useMemo(() => {
+    if (!pendingBillsForBuilding?.length) return []
+    return [...new Set(pendingBillsForBuilding.map((b: any) => b.unit_id).filter(Boolean))]
+  }, [pendingBillsForBuilding])
+
+  const { data: targetBillsByUnitId } = useQuery({
+    queryKey: ['bills-for-month-units', advanceTargetMonth, pendingUnitIds.join(',')],
+    enabled: isModalOpen && paymentMode === 'advance' && !!advanceTargetMonth && pendingUnitIds.length > 0,
+    queryFn: async () => {
+      const monthDate = `${advanceTargetMonth}-01`
+      const { data, error } = await supabase
+        .from('bills')
+        .select('id, unit_id, amount_paid, balance, total_amount, tenant_id, billing_month, status')
+        .eq('billing_month', monthDate)
+        .in('unit_id', pendingUnitIds)
+      if (error) throw error
+      const map: Record<string, (typeof data)[0]> = {}
+      for (const row of data || []) {
+        map[row.unit_id] = row
+      }
+      return map
+    },
+  })
 
   const { data: payments, error: paymentsError, isLoading: paymentsLoading } = useQuery({
     queryKey: ['payments', selectedMonth],
@@ -128,8 +252,6 @@ export default function Payments() {
         console.warn('No session found, queries may fail due to RLS')
       }
 
-      // Fetch payments first
-      // compute month range (start inclusive, nextMonth exclusive)
       const parts = selectedMonth.split('-').map(Number)
       const py = parts[0]
       const pm = parts[1]
@@ -149,20 +271,19 @@ export default function Payments() {
         .lt('payment_date', nextMonthFirst)
         .order('payment_date', { ascending: false })
         .limit(500)
-      
+
       if (paymentsError) {
         console.error('Payments query error:', paymentsError)
         throw paymentsError
       }
-      
+
       if (!paymentsData || paymentsData.length === 0) {
         console.log('No payments found')
         return []
       }
-      
+
       console.log('Payments fetched:', paymentsData.length, 'payments')
-      
-      // Fetch related data separately
+
       const paymentsWithRelations = await Promise.all(
         paymentsData.map(async (payment: any) => {
           const [billRes, unitRes, tenantRes] = await Promise.all([
@@ -186,10 +307,9 @@ export default function Payments() {
                   .select('name')
                   .eq('id', payment.tenant_id)
                   .single()
-              : Promise.resolve({ data: null, error: null })
+              : Promise.resolve({ data: null, error: null }),
           ])
-          
-          // Get building name
+
           let buildingName = null
           if (unitRes.data?.building_id) {
             const { data: buildingData } = await supabase
@@ -197,22 +317,25 @@ export default function Payments() {
               .select('name')
               .eq('id', unitRes.data.building_id)
               .single()
-            
+
             buildingName = buildingData?.name || null
           }
-          
+
           return {
             ...payment,
             bills: billRes.data ? { billing_month: billRes.data.billing_month } : null,
-            units: unitRes.data ? {
-              unit_number: unitRes.data.unit_number,
-              buildings: buildingName ? { name: buildingName } : null
-            } : null,
-            tenants: tenantRes.data ? { name: tenantRes.data.name } : null
+            units: unitRes.data
+              ? {
+                  unit_number: unitRes.data.unit_number,
+                  building_id: unitRes.data.building_id,
+                  buildings: buildingName ? { name: buildingName } : null,
+                }
+              : null,
+            tenants: tenantRes.data ? { name: tenantRes.data.name } : null,
           }
         })
       )
-      
+
       return paymentsWithRelations
     },
     staleTime: 0,
@@ -220,7 +343,6 @@ export default function Payments() {
     refetchOnWindowFocus: true,
   })
 
-  // Fetch units and tenants lists for filtering
   useQuery({
     queryKey: ['units-list'],
     queryFn: async () => {
@@ -230,14 +352,16 @@ export default function Payments() {
         .order('unit_number', { ascending: false })
       if (error) throw error
 
-      const unitsWithBuildings = await Promise.all((unitsData || []).map(async (u: any) => {
-        let buildingName = null
-        if (u.building_id) {
-          const { data: b } = await supabase.from('buildings').select('name').eq('id', u.building_id).single()
-          buildingName = b?.name || null
-        }
-        return { id: u.id, unit_number: u.unit_number, building: buildingName }
-      }))
+      const unitsWithBuildings = await Promise.all(
+        (unitsData || []).map(async (u: any) => {
+          let buildingName = null
+          if (u.building_id) {
+            const { data: b } = await supabase.from('buildings').select('name').eq('id', u.building_id).single()
+            buildingName = b?.name || null
+          }
+          return { id: u.id, unit_number: u.unit_number, building_id: u.building_id, building: buildingName }
+        })
+      )
 
       setUnitsList(unitsWithBuildings)
       return unitsWithBuildings
@@ -248,10 +372,7 @@ export default function Payments() {
   useQuery({
     queryKey: ['tenants-list'],
     queryFn: async () => {
-      const { data: tenantsData, error } = await supabase
-        .from('tenants')
-        .select('id,name')
-        .order('name')
+      const { data: tenantsData, error } = await supabase.from('tenants').select('id,name,unit_id').order('name')
       if (error) throw error
       setTenantsList(tenantsData || [])
       return tenantsData || []
@@ -285,38 +406,99 @@ export default function Payments() {
         .order('payment_date', { ascending: false })
       if (error) throw error
 
-      // Attach related data (bill month, unit number, building, tenant name)
-      const withRelations = await Promise.all((paymentsData || []).map(async (p: any) => {
-        const [billRes, unitRes, tenantRes] = await Promise.all([
-          p.bill_id ? supabase.from('bills').select('billing_month').eq('id', p.bill_id).single() : Promise.resolve({ data: null }),
-          p.unit_id ? supabase.from('units').select('unit_number,building_id').eq('id', p.unit_id).single() : Promise.resolve({ data: null }),
-          p.tenant_id ? supabase.from('tenants').select('name').eq('id', p.tenant_id).single() : Promise.resolve({ data: null }),
-        ])
-        let buildingName = null
-        if (unitRes.data?.building_id) {
-          const { data: b } = await supabase.from('buildings').select('name').eq('id', unitRes.data.building_id).single()
-          buildingName = b?.name || null
-        }
-        return {
-          ...p,
-          bills: billRes.data ? { billing_month: billRes.data.billing_month } : null,
-          units: unitRes.data ? { unit_number: unitRes.data.unit_number, buildings: buildingName ? { name: buildingName } : null } : null,
-          tenants: tenantRes.data ? { name: tenantRes.data.name } : null,
-        }
-      }))
+      const withRelations = await Promise.all(
+        (paymentsData || []).map(async (p: any) => {
+          const [billRes, unitRes, tenantRes] = await Promise.all([
+            p.bill_id ? supabase.from('bills').select('billing_month').eq('id', p.bill_id).single() : Promise.resolve({ data: null }),
+            p.unit_id ? supabase.from('units').select('unit_number,building_id').eq('id', p.unit_id).single() : Promise.resolve({ data: null }),
+            p.tenant_id ? supabase.from('tenants').select('name').eq('id', p.tenant_id).single() : Promise.resolve({ data: null }),
+          ])
+          let buildingName = null
+          if (unitRes.data?.building_id) {
+            const { data: b } = await supabase.from('buildings').select('name').eq('id', unitRes.data.building_id).single()
+            buildingName = b?.name || null
+          }
+          return {
+            ...p,
+            bills: billRes.data ? { billing_month: billRes.data.billing_month } : null,
+            units: unitRes.data
+              ? {
+                  unit_number: unitRes.data.unit_number,
+                  building_id: unitRes.data.building_id,
+                  buildings: buildingName ? { name: buildingName } : null,
+                }
+              : null,
+            tenants: tenantRes.data ? { name: tenantRes.data.name } : null,
+          }
+        })
+      )
 
       return withRelations
     },
   })
 
-  const paymentsSummary = (paymentsByEntity || []).reduce((acc: any, p: any) => {
-    acc.total = (acc.total || 0) + (p.amount || 0)
-    acc.count = (acc.count || 0) + 1
-    acc.last = acc.last || p.payment_date
-    return acc
-  }, { total: 0, count: 0, last: null })
+  const { data: buildingsList = [] } = useQuery({
+    queryKey: ['buildings-list-payments'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('buildings').select('id,name').order('name')
+      if (error) throw error
+      return data || []
+    },
+    staleTime: 1000 * 60 * 5,
+  })
+
+  const filteredUnitsForSelect = useMemo(() => {
+    if (!selectedBuildingId) return unitsList
+    return unitsList.filter((u: any) => u.building_id === selectedBuildingId)
+  }, [unitsList, selectedBuildingId])
+
+  const filteredTenantsForSelect = useMemo(() => {
+    if (!selectedBuildingId) return tenantsList
+    const unitIds = new Set(filteredUnitsForSelect.map((u: any) => u.id))
+    return tenantsList.filter((t: any) => t.unit_id && unitIds.has(t.unit_id))
+  }, [tenantsList, selectedBuildingId, filteredUnitsForSelect])
+
+  useEffect(() => {
+    if (!selectedEntityId) return
+    if (filterType === 'unit') {
+      if (!filteredUnitsForSelect.some((u: any) => u.id === selectedEntityId)) {
+        setSelectedEntityId('')
+      }
+    } else if (!filteredTenantsForSelect.some((t: any) => t.id === selectedEntityId)) {
+      setSelectedEntityId('')
+    }
+  }, [filterType, selectedEntityId, filteredUnitsForSelect, filteredTenantsForSelect])
+
+  const paymentsSummary = (paymentsByEntity || []).reduce(
+    (acc: any, p: any) => {
+      acc.total = (acc.total || 0) + (p.amount || 0)
+      acc.count = (acc.count || 0) + 1
+      acc.last = acc.last || p.payment_date
+      return acc
+    },
+    { total: 0, count: 0, last: null }
+  )
+
+  const buildingPaymentsSummary = useMemo(() => {
+    if (!selectedBuildingId || payments === undefined) return null
+    const rows = payments.filter((p: any) => p.units?.building_id === selectedBuildingId)
+    return rows.reduce(
+      (acc: any, p: any) => {
+        acc.total = (acc.total || 0) + (p.amount || 0)
+        acc.count = (acc.count || 0) + 1
+        acc.last = acc.last || p.payment_date
+        return acc
+      },
+      { total: 0, count: 0, last: null }
+    )
+  }, [selectedBuildingId, payments])
 
   const filteredPayments = (payments || []).filter((p: any) => {
+    if (selectedBuildingId && p.units?.building_id !== selectedBuildingId) return false
+    if (selectedEntityId) {
+      if (filterType === 'unit' && p.unit_id !== selectedEntityId) return false
+      if (filterType === 'tenant' && p.tenant_id !== selectedEntityId) return false
+    }
     if (!search) return true
     const q = search.toLowerCase()
     return (
@@ -331,154 +513,257 @@ export default function Payments() {
   const uploadReceipt = async (file: File): Promise<string> => {
     const fileExt = file.name.split('.').pop()
     const fileName = `receipts/${Math.random()}.${fileExt}`
-    const { data, error } = await supabase.storage
-      .from('receipts')
-      .upload(fileName, file)
+    const { data, error } = await supabase.storage.from('receipts').upload(fileName, file)
 
     if (error) throw error
-    const { data: { publicUrl } } = supabase.storage
-      .from('receipts')
-      .getPublicUrl(data.path)
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from('receipts').getPublicUrl(data.path)
     return publicUrl
   }
 
+  type BulkMutationResult = {
+    results: any[]
+    errors: { unitLabel: string; message: string }[]
+  }
+
   const createPaymentMutation = useMutation({
-    mutationFn: async (paymentData: Partial<Payment> & { receipt_url?: string }) => {
-      const bill = pendingBills?.find((b: any) => b.id === billId)
-      if (!bill) throw new Error('Bill not found')
+    mutationFn: async (
+      items: Array<
+        ApplyPaymentParams & {
+          unitLabel: string
+        }
+      >
+    ): Promise<BulkMutationResult> => {
+      const results: any[] = []
+      const errors: { unitLabel: string; message: string }[] = []
 
-      // Create payment
-      const { data: payment, error: paymentError } = await supabase
-        .from('payments')
-        .insert([paymentData])
-        .select()
-        .single()
-
-      if (paymentError) throw paymentError
-
-      // Update bill - only update amount_paid, balance is generated automatically
-      const newAmountPaid = (bill.amount_paid || 0) + paymentData.amount!
-      // Balance will be recalculated automatically: total_amount - newAmountPaid
-      const { error: billError } = await supabase
-        .from('bills')
-        .update({
-          amount_paid: newAmountPaid,
-        })
-        .eq('id', billId)
-
-      if (billError) throw billError
-
-      // Re-read latest bill values from DB to avoid stale/calc differences
-      const { data: freshBill, error: freshError } = await supabase
-        .from('bills')
-        .select('total_amount, amount_paid, balance, status')
-        .eq('id', billId)
-        .single()
-
-      if (freshError) {
-        console.warn('Failed to fetch fresh bill after payment:', freshError)
-      } else {
-        const total = freshBill.total_amount || 0
-        const paid = freshBill.amount_paid || 0
-        const balance = typeof freshBill.balance === 'number' ? freshBill.balance : (total - paid)
-        const EPS = 0.0001
-        const computedStatus = balance <= EPS ? 'paid' : paid > 0 ? 'partial' : 'pending'
-
-        if (computedStatus !== freshBill.status) {
-          const { error: statusErr } = await supabase
-            .from('bills')
-            .update({ status: computedStatus })
-            .eq('id', billId)
-
-          if (statusErr) console.warn('Failed to sync bill status:', statusErr)
+      for (const item of items) {
+        const { unitLabel, ...applyParams } = item
+        try {
+          const p = await applyPaymentToBill(applyParams)
+          results.push(p)
+        } catch (e: unknown) {
+          const message = e instanceof Error ? e.message : 'Unknown error'
+          errors.push({ unitLabel, message })
         }
       }
 
-      return payment
+      return { results, errors }
     },
-    onSuccess: async (payment) => {
-      // Invalidate all queries that depend on payments or bills
+    onSuccess: async (data) => {
       await queryClient.invalidateQueries({ queryKey: ['payments'] })
       await queryClient.invalidateQueries({ queryKey: ['pending-bills'] })
       await queryClient.invalidateQueries({ queryKey: ['bills'] })
+      await queryClient.invalidateQueries({ queryKey: ['bills-for-month-units'] })
       await queryClient.invalidateQueries({ queryKey: ['arrears-report'] })
       await queryClient.invalidateQueries({ queryKey: ['revenue-report'] })
       await queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
       await queryClient.invalidateQueries({ queryKey: ['tenants'] })
-      
-      // Wait for critical queries to refetch before closing modal
-      // This ensures the bill list is updated with fresh data
+
       await Promise.all([
         queryClient.refetchQueries({ queryKey: ['pending-bills'], type: 'active' }),
         queryClient.refetchQueries({ queryKey: ['bills'], type: 'active' }),
-        queryClient.refetchQueries({ queryKey: ['payments'], type: 'active' })
+        queryClient.refetchQueries({ queryKey: ['payments'], type: 'active' }),
       ])
-      
-      // Show success message
-      const bill = pendingBills?.find((b: any) => b.id === billId)
-      if (bill && payment) {
-        setSuccessMessage(`Payment of ${formatCurrency(payment.amount)} recorded successfully for ${bill.tenants?.name}`)
-        setShowSuccessAlert(true)
-        
-        // Auto-hide success message after 4 seconds
-        setTimeout(() => setShowSuccessAlert(false), 4000)
+
+      if (data.results.length === 0) {
+        alert(
+          data.errors.length
+            ? data.errors.map((e) => `${e.unitLabel}: ${e.message}`).join('\n')
+            : 'No payments were recorded.'
+        )
+        return
       }
-      
-      // After refetch completes, close modal and reset form
+
+      let msg = `Recorded ${data.results.length} payment(s) successfully.`
+      if (data.errors.length > 0) {
+        msg += ` ${data.errors.length} failed (see alert).`
+        alert(data.errors.map((e) => `${e.unitLabel}: ${e.message}`).join('\n'))
+      }
+      setSuccessMessage(msg)
+      setShowSuccessAlert(true)
+      setTimeout(() => setShowSuccessAlert(false), 5000)
+
       setIsModalOpen(false)
       resetForm()
-      
-      // Clear selected bill to prevent showing stale data
-      setBillId('')
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       console.error('Failed to create payment:', error)
-      alert(error.message || 'Failed to record payment. Please check your Supabase configuration.')
+      const message = error instanceof Error ? error.message : 'Failed to record payment.'
+      alert(message)
     },
   })
 
-  const resetForm = () => {
-    setBillId('')
-    setAmount('')
+  const resetForm = useCallback(() => {
+    setPaymentMode('current')
+    setAdvanceTargetMonth(nextCalendarMonth(selectedMonth))
+    setSelectedBillIds([])
+    setRowAmounts({})
+    setFillAllValue('')
     setPaymentMethod('cash')
     setReceiptFile(null)
     setNotes('')
+  }, [selectedMonth])
+
+  const openRecordModal = () => {
+    queryClient.refetchQueries({ queryKey: ['pending-bills'] })
+    setPaymentMode('current')
+    setAdvanceTargetMonth(nextCalendarMonth(selectedMonth))
+    setSelectedBillIds([])
+    setRowAmounts({})
+    setFillAllValue('')
+    setPaymentMethod('cash')
+    setReceiptFile(null)
+    setNotes('')
+    setIsModalOpen(true)
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const toggleBillSelection = (billId: string, bill: any) => {
+    setSelectedBillIds((prev: string[]) => {
+      const on = prev.includes(billId)
+      if (on) {
+        return prev.filter((id: string) => id !== billId)
+      }
+      let defaultBal = bill.balance
+      if (paymentMode === 'advance' && targetBillsByUnitId?.[bill.unit_id]) {
+        defaultBal = targetBillsByUnitId[bill.unit_id].balance
+      }
+      setRowAmounts((ra: Record<string, string>) => ({
+        ...ra,
+        [billId]: ra[billId] ?? (defaultBal != null ? String(defaultBal) : ''),
+      }))
+      return [...prev, billId]
+    })
+  }
+
+  const updateRowAmount = (billId: string, value: string) => {
+    setRowAmounts((prev: Record<string, string>) => ({ ...prev, [billId]: value }))
+  }
+
+  const applyFillAllToSelected = () => {
+    const v = fillAllValue.trim()
+    if (!v || selectedBillIds.length === 0) return
+    setRowAmounts((prev: Record<string, string>) => {
+      const next = { ...prev }
+      for (const id of selectedBillIds) {
+        next[id] = v
+      }
+      return next
+    })
+  }
+
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    
+
+    const selectedBills = (pendingBillsForBuilding || []).filter((b: any) => selectedBillIds.includes(b.id))
+    if (selectedBills.length === 0) {
+      alert('Select at least one bill.')
+      return
+    }
+
+    if (paymentMode === 'advance') {
+      if (!advanceTargetMonth) {
+        alert('Choose a target month for the advance payment.')
+        return
+      }
+      for (const bill of selectedBills) {
+        const sourceKey = billingMonthKey(bill.billing_month)
+        if (!(advanceTargetMonth > sourceKey)) {
+          alert(
+            `Advance month must be after ${sourceKey} for ${bill.units?.unit_number || 'unit'} (${bill.tenants?.name || ''}).`
+          )
+          return
+        }
+      }
+    }
+
+    const items: Array<ApplyPaymentParams & { unitLabel: string }> = []
+    const preErrors: string[] = []
+
+    for (const bill of selectedBills) {
+      const unitLabel = `${bill.units?.unit_number ?? '?'} — ${bill.tenants?.name ?? 'N/A'}`
+      const raw = rowAmounts[bill.id] ?? ''
+      const amt = parseFloat(raw)
+      if (!raw.trim() || Number.isNaN(amt) || amt <= 0) {
+        preErrors.push(`${unitLabel}: enter a valid amount.`)
+        continue
+      }
+
+      let targetBillId = bill.id
+      let tenantId = bill.tenant_id || ''
+
+      if (paymentMode === 'advance') {
+        const target = targetBillsByUnitId?.[bill.unit_id]
+        if (!target) {
+          preErrors.push(
+            `${unitLabel}: no bill for ${advanceTargetMonth}. Generate bills for that month on Billing first.`
+          )
+          continue
+        }
+        targetBillId = target.id
+        tenantId = target.tenant_id || bill.tenant_id || ''
+      }
+
+      if (!tenantId) {
+        preErrors.push(`${unitLabel}: missing tenant on bill; cannot record payment.`)
+        continue
+      }
+
+      const baseNotes = notes.trim()
+      const combinedNotes =
+        paymentMode === 'advance'
+          ? [baseNotes, `Advance payment for ${advanceTargetMonth}`].filter(Boolean).join(' — ')
+          : baseNotes || undefined
+
+      items.push({
+        targetBillId,
+        unitId: bill.unit_id,
+        tenantId,
+        amount: amt,
+        paymentMethod,
+        notes: combinedNotes,
+        unitLabel,
+      })
+    }
+
+    if (preErrors.length > 0 && items.length === 0) {
+      alert(preErrors.join('\n'))
+      return
+    }
+    if (preErrors.length > 0) {
+      const ok = window.confirm(
+        `${preErrors.length} row(s) have errors and will be skipped:\n\n${preErrors.slice(0, 8).join('\n')}${preErrors.length > 8 ? '\n…' : ''}\n\nContinue with ${items.length} payment(s)?`
+      )
+      if (!ok) return
+    }
+
     let receiptUrl: string | undefined
     if (receiptFile) {
       receiptUrl = await uploadReceipt(receiptFile)
     }
 
-    const bill = pendingBills?.find((b: any) => b.id === billId)
-    if (!bill) return
-
-    const paymentData = {
-      bill_id: billId,
-      unit_id: bill.unit_id,
-      tenant_id: bill.tenant_id || '',
-      amount: parseFloat(amount),
-      payment_method: paymentMethod,
-      receipt_url: receiptUrl,
-      payment_date: new Date().toISOString(),
-      notes: notes || undefined,
-    }
-
-    createPaymentMutation.mutate(paymentData)
+    const paymentDate = new Date().toISOString()
+    createPaymentMutation.mutate(
+      items.map((row) => ({
+        ...row,
+        receiptUrl,
+        paymentDate,
+      }))
+    )
   }
 
   const handleDownloadReceipt = async (payment: any) => {
     await generateReceiptPDF(payment)
   }
 
-  const selectedBill = pendingBills?.find((b: any) => b.id === billId)
+  const closeModal = () => {
+    setIsModalOpen(false)
+    resetForm()
+  }
 
   return (
     <div className="space-y-4 animate-fade-in w-full max-w-full overflow-x-hidden">
-      {/* Success Alert */}
       {showSuccessAlert && (
         <div className="p-4 bg-green-50 border border-green-200 rounded-xl flex items-start gap-3">
           <CheckCircle className="text-green-600 flex-shrink-0 mt-0.5" size={20} />
@@ -488,7 +773,7 @@ export default function Payments() {
           </div>
         </div>
       )}
-      
+
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 dark:from-slate-100 dark:to-slate-300 bg-clip-text text-transparent">
@@ -504,15 +789,7 @@ export default function Payments() {
             className="input"
             title="Filter payments by month"
           />
-          <button
-            onClick={() => {
-              // Force refetch of fresh bill data before opening modal
-              queryClient.refetchQueries({ queryKey: ['pending-bills'] })
-              setIsModalOpen(true)
-              resetForm()
-            }}
-            className="btn btn-primary"
-          >
+          <button onClick={openRecordModal} className="btn btn-primary">
             <Plus size={20} />
             Record Payment
           </button>
@@ -520,38 +797,65 @@ export default function Payments() {
       </div>
 
       <div className="card overflow-x-auto w-full">
-        <div className="p-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <select value={filterType} onChange={(e) => { setFilterType(e.target.value as any); setSelectedEntityId('') }} className="input">
-              <option value="unit">Unit</option>
-              <option value="tenant">Tenant</option>
-            </select>
+        <div className="p-3 flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="text-sm text-slate-600 whitespace-nowrap">Building</label>
             <select
-              value={selectedEntityId}
-              onChange={(e) => setSelectedEntityId(e.target.value)}
-              className="input w-64"
+              value={selectedBuildingId}
+              onChange={(e) => setSelectedBuildingId(e.target.value)}
+              className="input min-w-[200px]"
+              title="Filter payments and record-payment list by building"
             >
-              <option value="">Select {filterType}</option>
-              {filterType === 'unit' ? (
-                unitsList.map((u) => (
-                  <option key={u.id} value={u.id}>{u.unit_number} {u.building ? `(${u.building})` : ''}</option>
-                ))
-              ) : (
-                tenantsList.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))
-              )}
+              <option value="">All buildings</option>
+              {buildingsList.map((b: any) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
             </select>
           </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <select
+                value={filterType}
+                onChange={(e) => {
+                  setFilterType(e.target.value as 'unit' | 'tenant')
+                  setSelectedEntityId('')
+                }}
+                className="input"
+              >
+                <option value="unit">Unit</option>
+                <option value="tenant">Tenant</option>
+              </select>
+              <select
+                value={selectedEntityId}
+                onChange={(e) => setSelectedEntityId(e.target.value)}
+                className="input w-64"
+              >
+                <option value="">All {filterType === 'unit' ? 'units' : 'tenants'}</option>
+                {filterType === 'unit'
+                  ? filteredUnitsForSelect.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.unit_number} {u.building ? `(${u.building})` : ''}
+                      </option>
+                    ))
+                  : filteredTenantsForSelect.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+              </select>
+            </div>
 
-          <div className="flex items-center gap-3">
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search payments..."
-              className="input w-64"
-            />
+            <div className="flex items-center gap-3">
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search payments..."
+                className="input w-64"
+              />
+            </div>
           </div>
         </div>
         {selectedEntityId && paymentsByEntity && (
@@ -570,6 +874,24 @@ export default function Payments() {
             </div>
           </div>
         )}
+        {!selectedEntityId && selectedBuildingId && buildingPaymentsSummary !== null && (
+          <div className="p-3 grid grid-cols-3 gap-3">
+            <div className="p-3 bg-slate-50 rounded-xl">
+              <div className="text-sm text-slate-600">Building total (this month)</div>
+              <div className="font-bold text-slate-900">{formatCurrency(buildingPaymentsSummary.total || 0)}</div>
+            </div>
+            <div className="p-3 bg-slate-50 rounded-xl">
+              <div className="text-sm text-slate-600">Payments</div>
+              <div className="font-bold text-slate-900">{buildingPaymentsSummary.count || 0}</div>
+            </div>
+            <div className="p-3 bg-slate-50 rounded-xl">
+              <div className="text-sm text-slate-600">Last payment</div>
+              <div className="font-bold text-slate-900">
+                {buildingPaymentsSummary.last ? formatDate(buildingPaymentsSummary.last) : 'N/A'}
+              </div>
+            </div>
+          </div>
+        )}
         <table className="table w-full text-xs sm:text-sm">
           <thead>
             <tr>
@@ -584,12 +906,14 @@ export default function Payments() {
             </tr>
           </thead>
           <tbody>
-              {paymentsError && (
+            {paymentsError && (
               <tr>
-                <td colSpan={7} className="p-4 text-center">
+                <td colSpan={8} className="p-4 text-center">
                   <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
                     <p className="text-sm font-semibold text-red-900 mb-1">Error loading payments</p>
-                    <p className="text-sm text-red-700">{paymentsError.message || 'Failed to load payments. Please check your Supabase configuration.'}</p>
+                    <p className="text-sm text-red-700">
+                      {paymentsError.message || 'Failed to load payments. Please check your Supabase configuration.'}
+                    </p>
                   </div>
                 </td>
               </tr>
@@ -597,56 +921,47 @@ export default function Payments() {
 
             {paymentsLoading ? (
               <tr>
-                <td colSpan={7} className="p-4 text-center">
+                <td colSpan={8} className="p-4 text-center">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
                   <p className="mt-2 text-slate-600">Loading payments...</p>
                 </td>
               </tr>
             ) : filteredPayments && filteredPayments.length > 0 ? (
               filteredPayments.map((payment: any) => (
-              <tr key={payment.id}>
-                <td>{formatDate(payment.payment_date)}</td>
-                <td>{payment.tenants?.name || 'N/A'}</td>
-                <td>
-                  {payment.units?.unit_number} ({payment.units?.buildings?.name})
-                </td>
-                <td>{payment.bills?.billing_month || 'N/A'}</td>
-                <td className="font-semibold text-green-600">
-                  {formatCurrency(payment.amount)}
-                </td>
-                <td>
-                  <span className="badge badge-info capitalize">
-                    {payment.payment_method}
-                  </span>
-                </td>
-                <td>
-                  {payment.receipt_url ? (
-                    <a
-                      href={payment.receipt_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-primary-600 hover:underline"
+                <tr key={payment.id}>
+                  <td>{formatDate(payment.payment_date)}</td>
+                  <td>{payment.tenants?.name || 'N/A'}</td>
+                  <td>
+                    {payment.units?.unit_number} ({payment.units?.buildings?.name})
+                  </td>
+                  <td>{payment.bills?.billing_month || 'N/A'}</td>
+                  <td className="font-semibold text-green-600">{formatCurrency(payment.amount)}</td>
+                  <td>
+                    <span className="badge badge-info capitalize">{payment.payment_method}</span>
+                  </td>
+                  <td>
+                    {payment.receipt_url ? (
+                      <a href={payment.receipt_url} target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:underline">
+                        View
+                      </a>
+                    ) : (
+                      <span className="text-gray-400">No receipt</span>
+                    )}
+                  </td>
+                  <td>
+                    <button
+                      onClick={() => handleDownloadReceipt(payment)}
+                      className="p-2 text-gray-600 hover:text-primary-600 hover:bg-gray-100 rounded"
+                      title="Download Receipt"
                     >
-                      View
-                    </a>
-                  ) : (
-                    <span className="text-gray-400">No receipt</span>
-                  )}
-                </td>
-                <td>
-                  <button
-                    onClick={() => handleDownloadReceipt(payment)}
-                    className="p-2 text-gray-600 hover:text-primary-600 hover:bg-gray-100 rounded"
-                    title="Download Receipt"
-                  >
-                    <Download size={18} />
-                  </button>
-                </td>
-              </tr>
+                      <Download size={18} />
+                    </button>
+                  </td>
+                </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={7} className="p-8 text-center">
+                <td colSpan={8} className="p-8 text-center">
                   <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
                     <DollarSign className="text-slate-400" size={24} />
                   </div>
@@ -659,150 +974,197 @@ export default function Payments() {
       </div>
 
       {isModalOpen && (
-        <div className="modal-overlay" onClick={() => {
-          setIsModalOpen(false)
-          resetForm()
-        }}>
-          <div className="modal-content max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={closeModal}>
+          <div className="modal-content max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
-              <h2 className="text-2xl font-bold text-slate-900 mb-6">Record Payment</h2>
-              <form onSubmit={handleSubmit} className="space-y-5">
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  Select Bill
-                </label>
-                <select
-                  value={billId}
-                  onChange={(e) => setBillId(e.target.value)}
-                  required
-                  className="input"
-                >
-                  <option value="">Select a bill</option>
-                  {pendingBillsError && (
-                    <option disabled>Error loading bills</option>
-                  )}
-                  {pendingBillsLoading && !pendingBillsError && (
-                    <option disabled>Loading bills...</option>
-                  )}
-                  {!pendingBillsLoading && !pendingBillsError && pendingBills && pendingBills.length > 0 ? (
-                    pendingBills.map((bill: any) => (
-                      <option key={bill.id} value={bill.id}>
-                        {bill.units?.unit_number} - {bill.tenants?.name} - Balance:{' '}
-                        {formatCurrency(bill.balance)}
-                      </option>
-                    ))
-                  ) : !pendingBillsLoading && !pendingBillsError ? (
-                    <option disabled>No pending bills</option>
-                  ) : null}
-                </select>
-                {selectedBill && (
-                  <div className="mt-3 p-4 bg-slate-50 rounded-xl border border-slate-200 text-sm space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="text-slate-600 font-medium">Billing Month:</span>
-                      <span className="font-bold text-slate-900">{selectedBill.billing_month || 'N/A'}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-slate-600 font-medium">Total Bill:</span>
-                      <span className="font-bold text-slate-900">{formatCurrency(selectedBill.total_amount)}</span>
-                    </div>
-                    {selectedBill.arrears_brought_forward > 0 && (
-                      <div className="flex justify-between items-center text-orange-600">
-                        <span className="font-medium">Arrears:</span>
-                        <span className="font-bold">{formatCurrency(selectedBill.arrears_brought_forward)}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between items-center pt-2 border-t border-slate-300">
-                      <span className="text-slate-700 font-semibold">Paid:</span>
-                      <span className="font-bold text-slate-900">{formatCurrency(selectedBill.amount_paid || 0)}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-slate-700 font-semibold">Outstanding:</span>
-                      <span className="font-bold text-red-600">
-                        {formatCurrency(selectedBill.balance)}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  Amount (KES)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  required
-                  className="input"
-                  placeholder="0.00"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  Payment Method
-                </label>
-                <select
-                  value={paymentMethod}
-                  onChange={(e) =>
-                    setPaymentMethod(e.target.value as 'cash' | 'mpesa' | 'bank')
-                  }
-                  className="input"
-                >
-                  <option value="cash">Cash</option>
-                  <option value="mpesa">M-Pesa</option>
-                  <option value="bank">Bank Transfer</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  Upload Receipt (Optional)
-                </label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
-                  className="input"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  Notes (Optional)
-                </label>
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="input"
-                  rows={3}
-                  placeholder="Additional notes..."
-                />
-              </div>
-              <div className="flex gap-3 pt-4">
+              <h2 className="text-2xl font-bold text-slate-900 mb-4">Record Payment</h2>
+
+              <div className="flex rounded-lg border border-slate-200 p-1 mb-4 bg-slate-50">
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsModalOpen(false)
-                    resetForm()
-                  }}
-                  className="flex-1 btn btn-secondary"
+                  onClick={() => setPaymentMode('current')}
+                  className={`flex-1 py-2 px-3 text-sm font-semibold rounded-md transition-colors ${
+                    paymentMode === 'current' ? 'bg-white shadow text-slate-900' : 'text-slate-600'
+                  }`}
                 >
-                  Cancel
+                  Pay selected bill(s)
                 </button>
                 <button
-                  type="submit"
-                  className="flex-1 btn btn-primary"
-                  disabled={createPaymentMutation.isPending}
+                  type="button"
+                  onClick={() => setPaymentMode('advance')}
+                  className={`flex-1 py-2 px-3 text-sm font-semibold rounded-md transition-colors ${
+                    paymentMode === 'advance' ? 'bg-white shadow text-slate-900' : 'text-slate-600'
+                  }`}
                 >
-                  {createPaymentMutation.isPending ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                      Processing...
-                    </>
-                  ) : (
-                    'Record Payment'
-                  )}
+                  Advance (future month)
                 </button>
               </div>
+
+              {paymentMode === 'advance' && (
+                <div className="mb-4">
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Credit to billing month</label>
+                  <input
+                    type="month"
+                    value={advanceTargetMonth}
+                    onChange={(e) => setAdvanceTargetMonth(e.target.value)}
+                    className="input"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Must be after each selected bill&apos;s month. Target bills must already exist (generate on Billing).
+                  </p>
+                </div>
+              )}
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
+                    Pending bills ({selectedMonth}
+                    {selectedBuildingId
+                      ? ` · ${buildingsList.find((x: any) => x.id === selectedBuildingId)?.name ?? 'this building'}`
+                      : ''}
+                    )
+                  </label>
+                  <div className="border border-slate-200 rounded-xl max-h-56 overflow-y-auto divide-y divide-slate-100">
+                    {pendingBillsError && <div className="p-3 text-sm text-red-600">Error loading bills</div>}
+                    {pendingBillsLoading && !pendingBillsError && (
+                      <div className="p-3 text-sm text-slate-500">Loading bills...</div>
+                    )}
+                    {!pendingBillsLoading &&
+                      !pendingBillsError &&
+                      (!pendingBills || pendingBills.length === 0) && (
+                        <div className="p-3 text-sm text-slate-500">No pending bills for this month.</div>
+                      )}
+                    {!pendingBillsLoading &&
+                      !pendingBillsError &&
+                      pendingBills &&
+                      pendingBills.length > 0 &&
+                      pendingBillsForBuilding.length === 0 && (
+                        <div className="p-3 text-sm text-slate-500">
+                          No pending bills for the selected building this month. Choose another building or clear the
+                          building filter.
+                        </div>
+                      )}
+                    {!pendingBillsLoading &&
+                      !pendingBillsError &&
+                      pendingBillsForBuilding?.map((bill: any) => {
+                        const checked = selectedBillIds.includes(bill.id)
+                        const target =
+                          paymentMode === 'advance' && bill.unit_id ? targetBillsByUnitId?.[bill.unit_id] : null
+                        return (
+                          <label
+                            key={bill.id}
+                            className={`flex items-start gap-3 p-3 cursor-pointer hover:bg-slate-50 ${checked ? 'bg-slate-50/80' : ''}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleBillSelection(bill.id, bill)}
+                              className="mt-1 rounded border-slate-300"
+                            />
+                            <div className="flex-1 min-w-0 text-sm">
+                              <div className="font-medium text-slate-900">
+                                {bill.units?.unit_number} — {bill.tenants?.name}
+                              </div>
+                              <div className="text-slate-600 text-xs mt-0.5">
+                                This bill {formatCurrency(bill.balance)} due · Month {billingMonthKey(bill.billing_month)}
+                                {paymentMode === 'advance' && (
+                                  <>
+                                    {' '}
+                                    → target:{' '}
+                                    {target ? (
+                                      <span className="text-slate-800">{formatCurrency(target.balance)} bal</span>
+                                    ) : advanceTargetMonth ? (
+                                      <span className="text-amber-700">no bill</span>
+                                    ) : (
+                                      <span className="text-slate-400">—</span>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                              {checked && (
+                                <div className="mt-2 flex items-center gap-2">
+                                  <span className="text-xs text-slate-500 whitespace-nowrap">Amount (KES)</span>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={rowAmounts[bill.id] ?? ''}
+                                    onChange={(e) => updateRowAmount(bill.id, e.target.value)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="input flex-1 min-w-0 py-1.5 text-sm"
+                                    placeholder="0.00"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          </label>
+                        )
+                      })}
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2 mt-2">
+                    <div className="flex-1 min-w-[140px]">
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Fill all selected</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={fillAllValue}
+                        onChange={(e) => setFillAllValue(e.target.value)}
+                        className="input py-1.5 text-sm"
+                        placeholder="Amount"
+                      />
+                    </div>
+                    <button type="button" onClick={applyFillAllToSelected} className="btn btn-secondary text-sm py-1.5">
+                      Apply to selected
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Payment Method</label>
+                  <select
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value as 'cash' | 'mpesa' | 'bank')}
+                    className="input"
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="mpesa">M-Pesa</option>
+                    <option value="bank">Bank Transfer</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Upload Receipt (Optional)</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
+                    className="input"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">One file is attached to every payment in this batch.</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Notes (Optional)</label>
+                  <textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    className="input"
+                    rows={3}
+                    placeholder="Additional notes..."
+                  />
+                </div>
+                <div className="flex gap-3 pt-4">
+                  <button type="button" onClick={closeModal} className="flex-1 btn btn-secondary">
+                    Cancel
+                  </button>
+                  <button type="submit" className="flex-1 btn btn-primary" disabled={createPaymentMutation.isPending}>
+                    {createPaymentMutation.isPending ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        Processing...
+                      </>
+                    ) : (
+                      'Record payment(s)'
+                    )}
+                  </button>
+                </div>
               </form>
             </div>
           </div>
@@ -811,4 +1173,3 @@ export default function Payments() {
     </div>
   )
 }
-
