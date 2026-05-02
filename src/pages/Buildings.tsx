@@ -14,6 +14,10 @@ export default function Buildings() {
   const [editingBuilding, setEditingBuilding] = useState<Building | null>(null)
   const [name, setName] = useState('')
   const [location, setLocation] = useState('')
+  const [paymentMethodLabel, setPaymentMethodLabel] = useState('')
+  const [paymentPaybill, setPaymentPaybill] = useState('')
+  const [paymentAccountNumber, setPaymentAccountNumber] = useState('')
+  const [paymentNotes, setPaymentNotes] = useState('')
   const [units, setUnits] = useState<UnitForm[]>([])
   const [error, setError] = useState<string | null>(null)
   const queryClient = useQueryClient()
@@ -97,7 +101,20 @@ export default function Buildings() {
   }
 
   const createMutation = useMutation({
-    mutationFn: async ({ building, units }: { building: { name: string; location: string }, units: UnitForm[] }) => {
+    mutationFn: async ({
+      building,
+      units,
+    }: {
+      building: {
+        name: string
+        location: string
+        payment_method_label?: string
+        payment_paybill?: string
+        payment_account_number?: string
+        payment_notes?: string
+      }
+      units: UnitForm[]
+    }) => {
       // Get current user ID - verify session first
       const { data: { session } } = await supabase.auth.getSession()
       if (!session || !session.user) {
@@ -124,8 +141,11 @@ export default function Buildings() {
       // Even if we don't send it, the trigger will set it from auth.uid()
       const buildingToInsert = {
         name: building.name.trim(),
-        location: building.location.trim()
-        // user_id will be automatically set by database trigger
+        location: building.location.trim(),
+        payment_method_label: building.payment_method_label?.trim() || null,
+        payment_paybill: building.payment_paybill?.trim() || null,
+        payment_account_number: building.payment_account_number?.trim() || null,
+        payment_notes: building.payment_notes?.trim() || null,
       }
       
       // Insert building (trigger will set user_id automatically)
@@ -179,12 +199,17 @@ export default function Buildings() {
       await queryClient.invalidateQueries({ queryKey: ['buildings'] })
       await queryClient.invalidateQueries({ queryKey: ['units'] })
       await queryClient.invalidateQueries({ queryKey: ['occupancy-report'] })
+      await queryClient.invalidateQueries({ queryKey: ['buildings-list-payments'] })
       await queryClient.refetchQueries({ queryKey: ['buildings'] })
       await queryClient.refetchQueries({ queryKey: ['units'] })
       await queryClient.refetchQueries({ queryKey: ['occupancy-report'] })
       setIsModalOpen(false)
       setName('')
       setLocation('')
+      setPaymentMethodLabel('')
+      setPaymentPaybill('')
+      setPaymentAccountNumber('')
+      setPaymentNotes('')
       setUnits([])
       setError(null)
     },
@@ -281,6 +306,7 @@ export default function Buildings() {
       await queryClient.invalidateQueries({ queryKey: ['buildings'] })
       await queryClient.invalidateQueries({ queryKey: ['units'] })
       await queryClient.invalidateQueries({ queryKey: ['occupancy-report'] })
+      await queryClient.invalidateQueries({ queryKey: ['buildings-list-payments'] })
       await queryClient.refetchQueries({ queryKey: ['buildings'] })
       await queryClient.refetchQueries({ queryKey: ['units'] })
       await queryClient.refetchQueries({ queryKey: ['occupancy-report'] })
@@ -288,6 +314,10 @@ export default function Buildings() {
       setEditingBuilding(null)
       setName('')
       setLocation('')
+      setPaymentMethodLabel('')
+      setPaymentPaybill('')
+      setPaymentAccountNumber('')
+      setPaymentNotes('')
       setUnits([])
       setError(null)
     },
@@ -309,6 +339,7 @@ export default function Buildings() {
       await queryClient.invalidateQueries({ queryKey: ['buildings'] })
       await queryClient.invalidateQueries({ queryKey: ['units'] })
       await queryClient.invalidateQueries({ queryKey: ['occupancy-report'] })
+      await queryClient.invalidateQueries({ queryKey: ['buildings-list-payments'] })
       await queryClient.refetchQueries({ queryKey: ['buildings'] })
       await queryClient.refetchQueries({ queryKey: ['units'] })
       await queryClient.refetchQueries({ queryKey: ['occupancy-report'] })
@@ -342,15 +373,29 @@ export default function Buildings() {
     }
 
     if (editingBuilding) {
-      updateMutation.mutate({ 
-        id: editingBuilding.id, 
-        building: { name, location },
-        units: validUnits
+      updateMutation.mutate({
+        id: editingBuilding.id,
+        building: {
+          name,
+          location,
+          payment_method_label: paymentMethodLabel.trim() || null,
+          payment_paybill: paymentPaybill.trim() || null,
+          payment_account_number: paymentAccountNumber.trim() || null,
+          payment_notes: paymentNotes.trim() || null,
+        },
+        units: validUnits,
       })
     } else {
-      createMutation.mutate({ 
-        building: { name, location },
-        units: validUnits
+      createMutation.mutate({
+        building: {
+          name,
+          location,
+          payment_method_label: paymentMethodLabel.trim() || null,
+          payment_paybill: paymentPaybill.trim() || null,
+          payment_account_number: paymentAccountNumber.trim() || null,
+          payment_notes: paymentNotes.trim() || null,
+        },
+        units: validUnits,
       })
     }
   }
@@ -373,6 +418,10 @@ export default function Buildings() {
     setEditingBuilding(building)
     setName(building.name)
     setLocation(building.location)
+    setPaymentMethodLabel(building.payment_method_label ?? '')
+    setPaymentPaybill(building.payment_paybill ?? '')
+    setPaymentAccountNumber(building.payment_account_number ?? '')
+    setPaymentNotes(building.payment_notes ?? '')
     setIsModalOpen(true)
     await loadExistingUnits(building.id)
   }
@@ -398,6 +447,10 @@ export default function Buildings() {
             setEditingBuilding(null)
             setName('')
             setLocation('')
+            setPaymentMethodLabel('')
+            setPaymentPaybill('')
+            setPaymentAccountNumber('')
+            setPaymentNotes('')
             setUnits([])
             setError(null)
           }}
@@ -480,6 +533,10 @@ export default function Buildings() {
               setEditingBuilding(null)
               setName('')
               setLocation('')
+              setPaymentMethodLabel('')
+              setPaymentPaybill('')
+              setPaymentAccountNumber('')
+              setPaymentNotes('')
             }}
             className="btn btn-primary"
           >
@@ -495,6 +552,10 @@ export default function Buildings() {
           setEditingBuilding(null)
           setName('')
           setLocation('')
+          setPaymentMethodLabel('')
+          setPaymentPaybill('')
+          setPaymentAccountNumber('')
+          setPaymentNotes('')
           setUnits([])
           setError(null)
         }}>
@@ -544,6 +605,53 @@ export default function Buildings() {
                     className="input"
                     placeholder="Nairobi, Kenya"
                   />
+                </div>
+
+                <div className="pt-2 border-t border-slate-200">
+                  <p className="text-sm font-semibold text-slate-800 mb-3">Tenant payment instructions (optional)</p>
+                  <p className="text-xs text-slate-500 mb-3">
+                    Shown on invoices and receipts for this building. Leave blank to use the global payment info from Billing.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">How to pay (label)</label>
+                      <input
+                        type="text"
+                        value={paymentMethodLabel}
+                        onChange={(e) => setPaymentMethodLabel(e.target.value)}
+                        className="input"
+                        placeholder="e.g. M-Pesa Paybill"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Paybill / till</label>
+                      <input
+                        type="text"
+                        value={paymentPaybill}
+                        onChange={(e) => setPaymentPaybill(e.target.value)}
+                        className="input"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Account / phone</label>
+                      <input
+                        type="text"
+                        value={paymentAccountNumber}
+                        onChange={(e) => setPaymentAccountNumber(e.target.value)}
+                        className="input"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+                      <textarea
+                        value={paymentNotes}
+                        onChange={(e) => setPaymentNotes(e.target.value)}
+                        className="input"
+                        rows={2}
+                        placeholder="Short instructions for tenants"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 {/* Units Section */}
@@ -628,6 +736,10 @@ export default function Buildings() {
                       setEditingBuilding(null)
                       setName('')
                       setLocation('')
+                      setPaymentMethodLabel('')
+                      setPaymentPaybill('')
+                      setPaymentAccountNumber('')
+                      setPaymentNotes('')
                       setUnits([])
                       setError(null)
                     }}

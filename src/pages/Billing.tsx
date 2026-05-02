@@ -5,6 +5,7 @@ import { formatCurrency, formatMonth } from '@/lib/utils'
 import { generateInvoicePDF, generateBulkInvoicesPDF } from '@/lib/pdf'
 import { exportBillsToExcel } from '@/lib/excel'
 import { importBillsFromFile } from '@/lib/excel-import'
+import { fetchBuildingPaymentByUnitId } from '@/lib/payment-instructions'
 import ExportColumnsModal from '@/components/ExportColumnsModal'
 import useToast from '@/hooks/useToast'
 import { Plus, Calendar, CheckCircle, Receipt, Edit, FileText, AlertCircle, X, Printer, FileSpreadsheet, Upload } from 'lucide-react'
@@ -480,7 +481,22 @@ export default function Billing() {
         console.log('Bulk generation - Final amounts:', { garbageAmount, maintenanceAmount, otherUtilitiesAmount })
       }
 
-      const billsToInsert = occupiedUnits.map((unit: any) => {
+      const monthStr = selectedMonth + '-01'
+      const unitIds = occupiedUnits.map((u: any) => u.id)
+
+      const { data: existingMonthBills, error: existingErr } = await supabase
+        .from('bills')
+        .select('id, unit_id, amount_paid')
+        .eq('billing_month', monthStr)
+        .in('unit_id', unitIds)
+
+      if (existingErr) throw existingErr
+      const existingByUnit = new Map((existingMonthBills || []).map((row) => [row.unit_id, row]))
+
+      const toInsert: any[] = []
+      const toUpdate: { id: string; patch: Record<string, unknown> }[] = []
+
+      for (const unit of occupiedUnits) {
         const readings = meterReadings[unit.id] || {
           water_prev: prevMeterReadings.get(unit.id)?.water || 0,
           water_current: prevMeterReadings.get(unit.id)?.water || 0,
@@ -489,77 +505,85 @@ export default function Billing() {
         }
 
         const arrears = prevBalances.get(unit.id) || 0
-        // Note: water_units_consumed, water_amount, elec_units_consumed, elec_amount, 
-        // total_amount, and balance are all generated columns, calculated automatically by the database
 
-        return {
-          unit_id: unit.id,
+        const patch = {
           tenant_id: unit.tenants?.id || null,
-          billing_month: selectedMonth + '-01', // Convert YYYY-MM to YYYY-MM-01 for DATE type
+          billing_month: monthStr,
           water_prev_reading: readings.water_prev,
           water_current_reading: readings.water_current,
-          // Note: water_units_consumed, water_amount are generated columns
           water_rate: defaultWaterRate,
           elec_prev_reading: readings.elec_prev,
           elec_current_reading: readings.elec_current,
-          // Note: elec_units_consumed, elec_amount are generated columns
           elec_rate: defaultElecRate,
           rent_amount: unit.monthly_rent || 0,
           arrears_brought_forward: arrears,
           garbage_amount: garbageAmount,
           maintenance_amount: maintenanceAmount,
           other_utilities_amount: otherUtilitiesAmount,
-          // Note: total_amount, balance are generated columns
-          amount_paid: 0,
-          status: 'pending' as const,
         }
-      })
 
-      const { data: insertedBills, error: billsError } = await supabase
-        .from('bills')
-        .insert(billsToInsert)
-        .select()
-      
-      if (billsError) throw billsError
+        const ex = existingByUnit.get(unit.id)
+        if (ex) {
+          toUpdate.push({ id: ex.id, patch })
+        } else {
+          toInsert.push({
+            ...patch,
+            unit_id: unit.id,
+            amount_paid: 0,
+            status: 'pending' as const,
+          })
+        }
+      }
 
-      // Create utility_bill_items for each bill and active utility type
-      if (insertedBills && activeUtilityTypes && activeUtilityTypes.length > 0) {
-        const utilityBillItems = []
-        for (const bill of insertedBills) {
+      const processedBillIds: string[] = []
+
+      for (const u of toUpdate) {
+        const { error: upErr } = await supabase.from('bills').update(u.patch).eq('id', u.id)
+        if (upErr) throw upErr
+        processedBillIds.push(u.id)
+      }
+
+      let insertedBills: any[] = []
+      if (toInsert.length > 0) {
+        const { data: ins, error: billsError } = await supabase.from('bills').insert(toInsert).select()
+        if (billsError) throw billsError
+        insertedBills = ins || []
+        processedBillIds.push(...insertedBills.map((b) => b.id))
+      }
+
+      if (processedBillIds.length > 0) {
+        await supabase.from('utility_bill_items').delete().in('bill_id', processedBillIds)
+      }
+
+      if (processedBillIds.length > 0 && activeUtilityTypes && activeUtilityTypes.length > 0) {
+        const utilityBillItems: any[] = []
+        for (const billId of processedBillIds) {
           for (const utility of activeUtilityTypes) {
-            // For fixed-rate utilities, use 1 unit by default
-            const units = 1
             utilityBillItems.push({
-              bill_id: bill.id,
+              bill_id: billId,
               utility_type_id: utility.id,
-              units_consumed: units,
+              units_consumed: 1,
               rate: utility.rate,
             })
           }
         }
-
         if (utilityBillItems.length > 0) {
-          const { error: utilityItemsError } = await supabase
-            .from('utility_bill_items')
-            .insert(utilityBillItems)
-          
+          const { error: utilityItemsError } = await supabase.from('utility_bill_items').insert(utilityBillItems)
           if (utilityItemsError) {
             console.error('Failed to create utility bill items:', utilityItemsError)
-            // Don't throw - bills were created successfully, utility items are supplementary
           }
         }
       }
 
-        // Sync status for inserted bills using DB values (protects against client-side rounding/logic differences)
-        if (insertedBills && insertedBills.length > 0) {
-          for (const b of insertedBills) {
-            try {
-              await syncBillStatus(b.id)
-            } catch (err) {
-              console.warn('Failed to sync generated bill status for', b.id, err)
-            }
+      if (processedBillIds.length > 0) {
+        for (const billId of processedBillIds) {
+          try {
+            await syncBillStatus(billId)
+          } catch (err) {
+            console.warn('Failed to sync generated bill status for', billId, err)
           }
         }
+      }
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['bills'] })
@@ -1095,7 +1119,8 @@ export default function Billing() {
 
   const handlePrintBill = async (bill: any) => {
     try {
-      await generateInvoicePDF(bill)
+      const building_payment = bill.unit_id ? await fetchBuildingPaymentByUnitId(bill.unit_id) : null
+      await generateInvoicePDF({ ...bill, building_payment })
     } catch (error) {
       console.error('Error generating PDF:', error)
       setError('Failed to generate PDF. Please try again.')
@@ -1108,7 +1133,13 @@ export default function Billing() {
       return
     }
     try {
-      await generateBulkInvoicesPDF(bills)
+      const enriched = await Promise.all(
+        (bills || []).map(async (b: any) => ({
+          ...b,
+          building_payment: b.unit_id ? await fetchBuildingPaymentByUnitId(b.unit_id) : null,
+        }))
+      )
+      await generateBulkInvoicesPDF(enriched)
     } catch (error) {
       console.error('Error generating bulk PDF:', error)
       setError('Failed to generate bulk PDF. Please try again.')

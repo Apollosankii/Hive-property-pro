@@ -46,6 +46,10 @@ export interface Building {
   created_at: string
   created_by_user_id?: string
   modified_by_user_id?: string
+  payment_method_label?: string | null
+  payment_paybill?: string | null
+  payment_account_number?: string | null
+  payment_notes?: string | null
 }
 
 export interface Unit {

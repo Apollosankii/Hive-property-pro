@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf'
 import { formatCurrency, formatDate } from './utils'
+import { readGlobalPaymentSettings, resolvePaymentInstructions } from './payment-instructions'
 
 export async function generateReceiptPDF(payment: any) {
   const doc = new jsPDF()
@@ -32,25 +33,39 @@ export async function generateReceiptPDF(payment: any) {
     )
     yPos += 7
   }
-  // Payment method may come from the payment object or from app settings
-  const stored = localStorage.getItem('app-settings')
-  let settings: any = null
-  try { settings = stored ? JSON.parse(stored) : null } catch (e) { settings = null }
-  const method = (payment.payment_method || settings?.payment_method || '').toString()
-  const paybill = payment.paybill || settings?.paybill || ''
-  const acc = payment.account_number || settings?.account_number || ''
+  const tender = (payment.payment_method || '').toString()
+  if (tender) {
+    doc.text(`Payment channel: ${tender.toUpperCase()}`, 20, yPos)
+    yPos += 7
+  }
 
-  if (method) {
-    doc.text(`Payment Method: ${method.toUpperCase()}`, 20, yPos)
-    yPos += 7
-  }
-  if (paybill) {
-    doc.text(`Paybill: ${paybill}`, 20, yPos)
-    yPos += 7
-  }
-  if (acc) {
-    doc.text(`Account: ${acc}`, 20, yPos)
-    yPos += 7
+  const global = readGlobalPaymentSettings()
+  const resolved = resolvePaymentInstructions(payment.building_payment ?? null, global)
+
+  if (resolved.method || resolved.paybill || resolved.account || resolved.notes) {
+    doc.setFontSize(11)
+    doc.setFont('helvetica', 'bold')
+    doc.text('How to pay', 20, yPos)
+    yPos += 6
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    if (resolved.method) {
+      doc.text(`Method: ${resolved.method}`, 20, yPos)
+      yPos += 6
+    }
+    if (resolved.paybill) {
+      doc.text(`Paybill: ${resolved.paybill}`, 20, yPos)
+      yPos += 6
+    }
+    if (resolved.account) {
+      doc.text(`Account: ${resolved.account}`, 20, yPos)
+      yPos += 6
+    }
+    if (resolved.notes) {
+      const lines = doc.splitTextToSize(resolved.notes, 170)
+      doc.text(lines, 20, yPos)
+      yPos += 6 * lines.length
+    }
   }
 
   if (payment.notes) {
@@ -153,15 +168,10 @@ export async function generateInvoicePDF(bill: any) {
   doc.setFont('helvetica', 'bold')
   doc.text(`Balance Due: ${formatCurrency(bill.balance)}`, 20, yPos)
   
-  // Payment instructions: read from app-settings if present
-  const stored = localStorage.getItem('app-settings')
-  let settings: any = null
-  try { settings = stored ? JSON.parse(stored) : null } catch (e) { settings = null }
-  const method = settings?.payment_method || ''
-  const paybill = settings?.paybill || ''
-  const acc = settings?.account_number || ''
+  const globalInv = readGlobalPaymentSettings()
+  const resolvedInv = resolvePaymentInstructions(bill.building_payment ?? null, globalInv)
 
-  if (method || paybill || acc) {
+  if (resolvedInv.method || resolvedInv.paybill || resolvedInv.account || resolvedInv.notes) {
     yPos += 10
     doc.setFontSize(11)
     doc.setFont('helvetica', 'bold')
@@ -169,17 +179,22 @@ export async function generateInvoicePDF(bill: any) {
     yPos += 6
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(10)
-    if (method) {
-      doc.text(`Method: ${method}`, 20, yPos)
+    if (resolvedInv.method) {
+      doc.text(`Method: ${resolvedInv.method}`, 20, yPos)
       yPos += 6
     }
-    if (paybill) {
-      doc.text(`Paybill: ${paybill}`, 20, yPos)
+    if (resolvedInv.paybill) {
+      doc.text(`Paybill: ${resolvedInv.paybill}`, 20, yPos)
       yPos += 6
     }
-    if (acc) {
-      doc.text(`Account: ${acc}`, 20, yPos)
+    if (resolvedInv.account) {
+      doc.text(`Account: ${resolvedInv.account}`, 20, yPos)
       yPos += 6
+    }
+    if (resolvedInv.notes) {
+      const invLines = doc.splitTextToSize(resolvedInv.notes, 170)
+      doc.text(invLines, 20, yPos)
+      yPos += 6 * invLines.length
     }
   }
 
@@ -187,23 +202,24 @@ export async function generateInvoicePDF(bill: any) {
   doc.setFontSize(8)
   doc.setFont('helvetica', 'normal')
   doc.text('Please make payment by the due date. Thank you!', 105, 280, { align: 'center' })
-  
+
   doc.save(`invoice-${bill.id.slice(0, 8)}.pdf`)
 }
 
 // Generate bulk invoices - one PDF with multiple pages
 export async function generateBulkInvoicesPDF(bills: any[]) {
   if (bills.length === 0) return
-  
-  const doc = new jsPDF()
-  const storedSettings = localStorage.getItem('app-settings')
-  let appSettings: any = null
-  try { appSettings = storedSettings ? JSON.parse(storedSettings) : null } catch (e) { appSettings = null }
 
-  bills.forEach((bill, index) => {
+  const doc = new jsPDF()
+  const global = readGlobalPaymentSettings()
+
+  for (let index = 0; index < bills.length; index++) {
+    const bill = bills[index]
     if (index > 0) {
       doc.addPage()
     }
+
+    const resolved = resolvePaymentInstructions(bill.building_payment ?? null, global)
     
     // Header
     doc.setFontSize(20)
@@ -299,12 +315,7 @@ export async function generateBulkInvoicesPDF(bills: any[]) {
     doc.setFont('helvetica', 'bold')
     doc.text(`Balance Due: ${formatCurrency(bill.balance)}`, 20, yPos)
 
-    // Payment instructions from app settings (if present)
-    const method = appSettings?.payment_method || ''
-    const paybill = appSettings?.paybill || ''
-    const acc = appSettings?.account_number || ''
-
-    if (method || paybill || acc) {
+    if (resolved.method || resolved.paybill || resolved.account || resolved.notes) {
       yPos += 10
       doc.setFontSize(11)
       doc.setFont('helvetica', 'bold')
@@ -312,17 +323,22 @@ export async function generateBulkInvoicesPDF(bills: any[]) {
       yPos += 6
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(10)
-      if (method) {
-        doc.text(`Method: ${method}`, 20, yPos)
+      if (resolved.method) {
+        doc.text(`Method: ${resolved.method}`, 20, yPos)
         yPos += 6
       }
-      if (paybill) {
-        doc.text(`Paybill: ${paybill}`, 20, yPos)
+      if (resolved.paybill) {
+        doc.text(`Paybill: ${resolved.paybill}`, 20, yPos)
         yPos += 6
       }
-      if (acc) {
-        doc.text(`Account: ${acc}`, 20, yPos)
+      if (resolved.account) {
+        doc.text(`Account: ${resolved.account}`, 20, yPos)
         yPos += 6
+      }
+      if (resolved.notes) {
+        const bulkLines = doc.splitTextToSize(resolved.notes, 170)
+        doc.text(bulkLines, 20, yPos)
+        yPos += 6 * bulkLines.length
       }
     }
 
@@ -330,8 +346,8 @@ export async function generateBulkInvoicesPDF(bills: any[]) {
     doc.setFontSize(8)
     doc.setFont('helvetica', 'normal')
     doc.text('Please make payment by the due date. Thank you!', 105, 280, { align: 'center' })
-  })
-  
+  }
+
   doc.save(`invoices-${formatDate(new Date().toISOString()).replace(/\//g, '-')}.pdf`)
 }
 

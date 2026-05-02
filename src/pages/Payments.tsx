@@ -1,9 +1,12 @@
 import { useState, useMemo, useCallback, useEffect, type FormEvent } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Plus, Download, DollarSign, CheckCircle } from 'lucide-react'
 import { generateReceiptPDF } from '@/lib/pdf'
+import { ensureAdvanceRentBill } from '@/lib/bills'
+import { fetchBuildingPaymentByUnitId, readGlobalPaymentSettings, resolvePaymentInstructions, buildingHasPaymentOverride } from '@/lib/payment-instructions'
 
 function billingMonthKey(billingMonth: string): string {
   const d = new Date(billingMonth)
@@ -164,7 +167,7 @@ export default function Payments() {
             bill.unit_id
               ? supabase
                   .from('units')
-                  .select('unit_number, building_id')
+                  .select('unit_number, building_id, monthly_rent')
                   .eq('id', bill.unit_id)
                   .single()
               : Promise.resolve({ data: null, error: null }),
@@ -195,6 +198,7 @@ export default function Payments() {
               ? {
                   unit_number: unitRes.data.unit_number,
                   building_id: unitRes.data.building_id,
+                  monthly_rent: unitRes.data.monthly_rent,
                   buildings: buildingName ? { name: buildingName } : null,
                 }
               : null,
@@ -440,12 +444,20 @@ export default function Payments() {
   const { data: buildingsList = [] } = useQuery({
     queryKey: ['buildings-list-payments'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('buildings').select('id,name').order('name')
+      const { data, error } = await supabase
+        .from('buildings')
+        .select('id,name,payment_method_label,payment_paybill,payment_account_number,payment_notes')
+        .order('name')
       if (error) throw error
       return data || []
     },
     staleTime: 1000 * 60 * 5,
   })
+
+  const selectedBuildingRow = useMemo(
+    () => (buildingsList as any[]).find((x) => x.id === selectedBuildingId) ?? null,
+    [buildingsList, selectedBuildingId]
+  )
 
   const filteredUnitsForSelect = useMemo(() => {
     if (!selectedBuildingId) return unitsList
@@ -628,6 +640,8 @@ export default function Payments() {
       let defaultBal = bill.balance
       if (paymentMode === 'advance' && targetBillsByUnitId?.[bill.unit_id]) {
         defaultBal = targetBillsByUnitId[bill.unit_id].balance
+      } else if (paymentMode === 'advance' && bill.units?.monthly_rent != null) {
+        defaultBal = bill.units.monthly_rent
       }
       setRowAmounts((ra: Record<string, string>) => ({
         ...ra,
@@ -695,14 +709,29 @@ export default function Payments() {
 
       if (paymentMode === 'advance') {
         const target = targetBillsByUnitId?.[bill.unit_id]
-        if (!target) {
-          preErrors.push(
-            `${unitLabel}: no bill for ${advanceTargetMonth}. Generate bills for that month on Billing first.`
-          )
-          continue
+        if (target) {
+          targetBillId = target.id
+          tenantId = target.tenant_id || bill.tenant_id || ''
+        } else {
+          try {
+            targetBillId = await ensureAdvanceRentBill({
+              unitId: bill.unit_id,
+              tenantId: bill.tenant_id,
+              targetMonthYyyyMm: advanceTargetMonth,
+            })
+            const { data: stubBill } = await supabase
+              .from('bills')
+              .select('tenant_id')
+              .eq('id', targetBillId)
+              .single()
+            tenantId = stubBill?.tenant_id || bill.tenant_id || ''
+          } catch (err) {
+            preErrors.push(
+              `${unitLabel}: ${err instanceof Error ? err.message : 'Could not create advance rent bill.'}`
+            )
+            continue
+          }
         }
-        targetBillId = target.id
-        tenantId = target.tenant_id || bill.tenant_id || ''
       }
 
       if (!tenantId) {
@@ -754,7 +783,8 @@ export default function Payments() {
   }
 
   const handleDownloadReceipt = async (payment: any) => {
-    await generateReceiptPDF(payment)
+    const building_payment = payment.unit_id ? await fetchBuildingPaymentByUnitId(payment.unit_id) : null
+    await generateReceiptPDF({ ...payment, building_payment })
   }
 
   const closeModal = () => {
@@ -814,6 +844,45 @@ export default function Payments() {
               ))}
             </select>
           </div>
+          {selectedBuildingId && selectedBuildingRow && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 space-y-2">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <span className="font-semibold text-slate-900">Payment details for this building</span>
+                <Link to="/buildings" className="text-primary-600 hover:underline text-xs font-medium shrink-0">
+                  Edit in Buildings
+                </Link>
+              </div>
+              {!buildingHasPaymentOverride(selectedBuildingRow) ? (
+                <p className="text-xs text-slate-500">
+                  No building-specific instructions saved. Showing your global Payment Info from Billing (set under
+                  Billing → Payment Info).
+                </p>
+              ) : null}
+              {(() => {
+                const resolved = resolvePaymentInstructions(selectedBuildingRow, readGlobalPaymentSettings())
+                if (!resolved.method && !resolved.paybill && !resolved.account && !resolved.notes) {
+                  return <p className="text-slate-500 text-xs">Nothing configured yet.</p>
+                }
+                return (
+                  <ul className="space-y-1 text-slate-800">
+                    {resolved.method ? <li>Method: {resolved.method}</li> : null}
+                    {resolved.paybill ? <li>Paybill: {resolved.paybill}</li> : null}
+                    {resolved.account ? <li>Account: {resolved.account}</li> : null}
+                    {resolved.notes ? <li className="whitespace-pre-wrap">Notes: {resolved.notes}</li> : null}
+                  </ul>
+                )
+              })()}
+            </div>
+          )}
+          {!selectedBuildingId && (
+            <p className="text-xs text-slate-500">
+              Select a building to show its paybill/account instructions here. Global defaults come from{' '}
+              <Link to="/billing" className="text-primary-600 hover:underline">
+                Billing
+              </Link>{' '}
+              → Payment Info.
+            </p>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2 flex-wrap">
               <select
@@ -1010,7 +1079,9 @@ export default function Payments() {
                     className="input"
                   />
                   <p className="text-xs text-slate-500 mt-1">
-                    Must be after each selected bill&apos;s month. Target bills must already exist (generate on Billing).
+                    Must be after each selected bill&apos;s month. If no bill exists for that month yet, a{' '}
+                    <strong>rent-only</strong> bill is created from the unit&apos;s monthly rent (utilities added when
+                    you run Generate Bills). Existing payments stay on the bill.
                   </p>
                 </div>
               )}
@@ -1074,7 +1145,7 @@ export default function Payments() {
                                     {target ? (
                                       <span className="text-slate-800">{formatCurrency(target.balance)} bal</span>
                                     ) : advanceTargetMonth ? (
-                                      <span className="text-amber-700">no bill</span>
+                                      <span className="text-emerald-800">creates rent-only bill</span>
                                     ) : (
                                       <span className="text-slate-400">—</span>
                                     )}
