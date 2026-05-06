@@ -50,20 +50,42 @@ export default function TenantDetail() {
     staleTime: 0,
   })
 
-  const { data: vacantUnits } = useQuery({
+  const { data: vacantUnits, error: vacantUnitsError } = useQuery({
     queryKey: ['vacant-units-for-move-tenant', moveBuildingId],
     queryFn: async () => {
       let query = supabase
         .from('units')
-        .select('id, unit_number, building_id, monthly_rent, status, tenant_id, buildings(name)')
+        .select('id, unit_number, building_id, monthly_rent, status, tenant_id')
         .eq('status', 'vacant')
         .order('unit_number', { ascending: true })
 
       if (moveBuildingId) query = query.eq('building_id', moveBuildingId)
 
-      const { data, error } = await query
-      if (error) throw error
-      return data || []
+      const { data: units, error: unitsError } = await query
+      if (unitsError) throw unitsError
+      const unitRows = units || []
+
+      const buildingIds = Array.from(
+        new Set(unitRows.map((unit: any) => unit.building_id).filter(Boolean))
+      )
+
+      const buildingsById = new Map<string, string>()
+      if (buildingIds.length > 0) {
+        const { data: buildingsData, error: buildingsError } = await supabase
+          .from('buildings')
+          .select('id, name')
+          .in('id', buildingIds)
+
+        if (buildingsError) throw buildingsError
+        (buildingsData || []).forEach((building: any) => {
+          if (building?.id) buildingsById.set(building.id, building.name)
+        })
+      }
+
+      return unitRows.map((unit: any) => ({
+        ...unit,
+        buildings: unit.building_id ? { name: buildingsById.get(unit.building_id) || '' } : null,
+      }))
     },
     enabled: isMoveModalOpen,
     staleTime: 0,
@@ -652,6 +674,11 @@ export default function TenantDetail() {
                       </option>
                     ))}
                   </select>
+                  {vacantUnitsError && (
+                    <p className="text-sm text-red-600 mt-2">
+                      Failed to load vacant units: {(vacantUnitsError as any)?.message || 'Unknown error'}
+                    </p>
+                  )}
                 </div>
 
                 <div>
