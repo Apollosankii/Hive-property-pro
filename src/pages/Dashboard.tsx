@@ -94,7 +94,7 @@ export default function Dashboard() {
     queryFn: async () => {
       let q = supabase
         .from('payments')
-        .select('*, tenants(name), units(unit_number), buildings(name)')
+        .select('*, tenants(name), units!payments_unit_id_fkey(unit_number)')
         .order('created_at', { ascending: false })
         .limit(10)
 
