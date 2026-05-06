@@ -29,7 +29,7 @@ export default function TenantDetail() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('tenants')
-        .select('*, units!fk_tenants_unit(unit_number, buildings(name), monthly_rent)')
+        .select('*, units!fk_tenants_unit(unit_number, buildings!units_building_id_fkey(name), monthly_rent)')
         .eq('id', id)
         .single()
       
