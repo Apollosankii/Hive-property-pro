@@ -176,6 +176,11 @@ export default function TenantDetail() {
     )
   }
 
+  // Supabase embedded relations may come back as object or array depending on FK ambiguity/history.
+  // Normalize to a single unit/building shape so render logic never crashes.
+  const tenantUnit = Array.isArray((tenant as any).units) ? (tenant as any).units[0] : (tenant as any).units
+  const tenantBuilding = Array.isArray(tenantUnit?.buildings) ? tenantUnit?.buildings?.[0] : tenantUnit?.buildings
+
   const fromUnitId = tenant.unit_id as string | undefined
   const canMoveTenant = Boolean(fromUnitId && tenant.status === 'active')
   const derivedMoveMonth = useMemo(() => {
@@ -190,7 +195,7 @@ export default function TenantDetail() {
 
   const prorationPreview = useMemo(() => {
     if (!moveDate) return null
-    const fromMonthly = Number(tenant.units?.monthly_rent || 0) || 0
+    const fromMonthly = Number(tenantUnit?.monthly_rent || 0) || 0
     const toMonthly = Number(selectedToUnit?.monthly_rent || 0) || 0
 
     // Interpret moveDate as local date; day-of-month drives the same split rule as SQL:
@@ -219,7 +224,7 @@ export default function TenantDetail() {
     const oldRent = Math.round((fromMonthly * (oldDays / daysInMonth)) * 100) / 100
     const newRent = Math.round((toMonthly * (newDays / daysInMonth)) * 100) / 100
     return { daysInMonth, oldDays, newDays, oldRent, newRent }
-  }, [moveDate, moveProrate, selectedToUnit?.monthly_rent, tenant.units?.monthly_rent])
+  }, [moveDate, moveProrate, selectedToUnit?.monthly_rent, tenantUnit?.monthly_rent])
 
   const totalBalance = bills?.reduce((sum, b) => sum + (b.balance || 0), 0) || 0
   const totalPaid = payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0
@@ -260,11 +265,11 @@ export default function TenantDetail() {
                   <span>{tenant.email}</span>
                 </div>
               )}
-              {tenant.units && (
+              {tenantUnit && (
                 <div className="flex items-center gap-3">
                   <Home className="text-gray-400" size={20} />
                   <span>
-                    {tenant.units.unit_number} - {tenant.units.buildings?.name}
+                    {tenantUnit.unit_number} - {tenantBuilding?.name}
                   </span>
                 </div>
               )}
@@ -333,7 +338,7 @@ export default function TenantDetail() {
             <h3 className="font-semibold">Monthly Rent</h3>
           </div>
           <p className="text-3xl font-bold">
-            {formatCurrency(tenant.units?.monthly_rent || 0)}
+            {formatCurrency(tenantUnit?.monthly_rent || 0)}
           </p>
         </div>
       </div>
@@ -584,9 +589,9 @@ export default function TenantDetail() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">From unit</label>
                   <div className="input bg-gray-50">
-                    {tenant.units?.unit_number ? (
+                    {tenantUnit?.unit_number ? (
                       <span>
-                        {tenant.units.unit_number} {tenant.units.buildings?.name ? `- ${tenant.units.buildings.name}` : ''}
+                        {tenantUnit.unit_number} {tenantBuilding?.name ? `- ${tenantBuilding.name}` : ''}
                       </span>
                     ) : (
                       <span className="text-gray-500">Unknown</span>
