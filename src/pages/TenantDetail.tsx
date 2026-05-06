@@ -69,6 +69,62 @@ export default function TenantDetail() {
     staleTime: 0,
   })
 
+  const tenantUnit = useMemo(() => {
+    if (!tenant) return null
+    const unitsRel = (tenant as any).units
+    return Array.isArray(unitsRel) ? unitsRel[0] : unitsRel
+  }, [tenant])
+
+  const tenantBuilding = useMemo(() => {
+    const buildingsRel = tenantUnit?.buildings
+    return Array.isArray(buildingsRel) ? buildingsRel[0] : buildingsRel
+  }, [tenantUnit])
+
+  const fromUnitId = (tenant?.unit_id as string | undefined) || undefined
+  const canMoveTenant = Boolean(fromUnitId && tenant?.status === 'active')
+  const derivedMoveMonth = useMemo(() => {
+    if (!moveDate) return ''
+    if (moveDate.length < 7) return ''
+    return `${moveDate.slice(0, 7)}-01`
+  }, [moveDate])
+
+  const selectedToUnit = useMemo(() => {
+    return (vacantUnits || []).find((u: any) => u.id === moveToUnitId) || null
+  }, [vacantUnits, moveToUnitId])
+
+  const prorationPreview = useMemo(() => {
+    if (!moveDate) return null
+    const fromMonthly = Number(tenantUnit?.monthly_rent || 0) || 0
+    const toMonthly = Number(selectedToUnit?.monthly_rent || 0) || 0
+
+    // Interpret moveDate as local date; day-of-month drives the same split rule as SQL:
+    // move date is first day in new unit, old unit billed up to day before move date.
+    const d = new Date(`${moveDate}T00:00:00`)
+    if (Number.isNaN(d.getTime())) return null
+
+    const year = d.getFullYear()
+    const monthIndex = d.getMonth() // 0-based
+    const daysInMonth = new Date(year, monthIndex + 1, 0).getDate()
+    const moveDay = d.getDate()
+
+    const oldDays = Math.max(0, Math.min(daysInMonth, moveDay - 1))
+    const newDays = Math.max(0, daysInMonth - oldDays)
+
+    if (!moveProrate) {
+      return {
+        daysInMonth,
+        oldDays,
+        newDays,
+        oldRent: fromMonthly,
+        newRent: 0,
+      }
+    }
+
+    const oldRent = Math.round((fromMonthly * (oldDays / daysInMonth)) * 100) / 100
+    const newRent = Math.round((toMonthly * (newDays / daysInMonth)) * 100) / 100
+    return { daysInMonth, oldDays, newDays, oldRent, newRent }
+  }, [moveDate, moveProrate, selectedToUnit?.monthly_rent, tenantUnit?.monthly_rent])
+
   const { data: bills } = useQuery({
     queryKey: ['tenant-bills', id],
     queryFn: async () => {
@@ -175,56 +231,6 @@ export default function TenantDetail() {
       </div>
     )
   }
-
-  // Supabase embedded relations may come back as object or array depending on FK ambiguity/history.
-  // Normalize to a single unit/building shape so render logic never crashes.
-  const tenantUnit = Array.isArray((tenant as any).units) ? (tenant as any).units[0] : (tenant as any).units
-  const tenantBuilding = Array.isArray(tenantUnit?.buildings) ? tenantUnit?.buildings?.[0] : tenantUnit?.buildings
-
-  const fromUnitId = tenant.unit_id as string | undefined
-  const canMoveTenant = Boolean(fromUnitId && tenant.status === 'active')
-  const derivedMoveMonth = useMemo(() => {
-    if (!moveDate) return ''
-    if (moveDate.length < 7) return ''
-    return `${moveDate.slice(0, 7)}-01`
-  }, [moveDate])
-
-  const selectedToUnit = useMemo(() => {
-    return (vacantUnits || []).find((u: any) => u.id === moveToUnitId) || null
-  }, [vacantUnits, moveToUnitId])
-
-  const prorationPreview = useMemo(() => {
-    if (!moveDate) return null
-    const fromMonthly = Number(tenantUnit?.monthly_rent || 0) || 0
-    const toMonthly = Number(selectedToUnit?.monthly_rent || 0) || 0
-
-    // Interpret moveDate as local date; day-of-month drives the same split rule as SQL:
-    // move date is first day in new unit, old unit billed up to day before move date.
-    const d = new Date(`${moveDate}T00:00:00`)
-    if (Number.isNaN(d.getTime())) return null
-
-    const year = d.getFullYear()
-    const monthIndex = d.getMonth() // 0-based
-    const daysInMonth = new Date(year, monthIndex + 1, 0).getDate()
-    const moveDay = d.getDate()
-
-    const oldDays = Math.max(0, Math.min(daysInMonth, moveDay - 1))
-    const newDays = Math.max(0, daysInMonth - oldDays)
-
-    if (!moveProrate) {
-      return {
-        daysInMonth,
-        oldDays,
-        newDays,
-        oldRent: fromMonthly,
-        newRent: 0,
-      }
-    }
-
-    const oldRent = Math.round((fromMonthly * (oldDays / daysInMonth)) * 100) / 100
-    const newRent = Math.round((toMonthly * (newDays / daysInMonth)) * 100) / 100
-    return { daysInMonth, oldDays, newDays, oldRent, newRent }
-  }, [moveDate, moveProrate, selectedToUnit?.monthly_rent, tenantUnit?.monthly_rent])
 
   const totalBalance = bills?.reduce((sum, b) => sum + (b.balance || 0), 0) || 0
   const totalPaid = payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0
