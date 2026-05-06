@@ -141,12 +141,14 @@ export default function SecurityDeposits() {
   })
 
   const processLeaseEndMutation = useMutation({
-    mutationFn: async ({ depositId, damagesAmount, damagesDescription, meterWaterAmount, meterElecAmount, isEditing }: { 
+    mutationFn: async ({ depositId, damagesAmount, damagesDescription, meterWaterAmount, meterElecAmount, finalWaterReading, finalElecReading, isEditing }: { 
       depositId: string
       damagesAmount: number
       damagesDescription: string
       meterWaterAmount?: number
       meterElecAmount?: number
+      finalWaterReading?: number
+      finalElecReading?: number
       isEditing?: boolean
     }) => {
       // Get tenant's outstanding balance and arrears
@@ -299,20 +301,44 @@ export default function SecurityDeposits() {
       
       console.log('Deposit updated:', { depositId, status, updated_at: now, refundAmount })
 
-      // If refund was processed (status is 'refunded'), archive tenant and mark unit as vacant
-      if (status === 'refunded') {
-        // Archive the tenant (set status to 'inactive')
-        const { error: tenantUpdateError } = await supabase
-          .from('tenants')
-          .update({ 
-            status: 'inactive',
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', depositData.tenant_id)
+      // Update the unit meter readings from lease-end data when provided
+      if (depositData.unit_id) {
+        const unitPatch: Record<string, unknown> = {
+          updated_at: new Date().toISOString(),
+        }
 
-        if (tenantUpdateError) throw tenantUpdateError
+        if (typeof finalWaterReading === 'number' && Number.isFinite(finalWaterReading)) {
+          unitPatch.water_prev_reading = finalWaterReading
+          unitPatch.water_current_reading = finalWaterReading
+        }
 
-        // Mark unit as vacant and remove tenant assignment
+        if (typeof finalElecReading === 'number' && Number.isFinite(finalElecReading)) {
+          unitPatch.elec_prev_reading = finalElecReading
+          unitPatch.elec_current_reading = finalElecReading
+        }
+
+        if (Object.keys(unitPatch).length > 1) {
+          const { error: unitReadingsError } = await supabase
+            .from('units')
+            .update(unitPatch)
+            .eq('id', depositData.unit_id)
+
+          if (unitReadingsError) throw unitReadingsError
+        }
+      }
+
+      // Archive the tenant and mark the unit as vacant once lease end is processed
+      const { error: tenantUpdateError } = await supabase
+        .from('tenants')
+        .update({ 
+          status: 'inactive',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', depositData.tenant_id)
+
+      if (tenantUpdateError) throw tenantUpdateError
+
+      if (depositData.unit_id) {
         const { error: unitUpdateError } = await supabase
           .from('units')
           .update({ 
@@ -470,6 +496,8 @@ export default function SecurityDeposits() {
     const elecRate = parseFloat(meterElecRate || '0') || 0
     const waterDeduction = Math.max(0, waterUsage * waterRate)
     const elecDeduction = Math.max(0, elecUsage * elecRate)
+    const finalWaterValue = finalWaterReading.trim() ? parseFloat(finalWaterReading) : undefined
+    const finalElecValue = finalElecReading.trim() ? parseFloat(finalElecReading) : undefined
 
     processLeaseEndMutation.mutate({
       depositId: selectedDeposit.id,
@@ -477,6 +505,8 @@ export default function SecurityDeposits() {
       damagesDescription: damagesDescription,
       meterWaterAmount: waterDeduction,
       meterElecAmount: elecDeduction,
+      finalWaterReading: finalWaterValue,
+      finalElecReading: finalElecValue,
       isEditing: isEditingLeaseEnd
     })
   }
