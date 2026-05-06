@@ -21,6 +21,7 @@ export default function Billing() {
   const [showCreateBillModal, setShowCreateBillModal] = useState(false)
   const [showCreateUtilityBillModal, setShowCreateUtilityBillModal] = useState(false)
   const [editingBill, setEditingBill] = useState<any>(null)
+  const [editingBillTenantId, setEditingBillTenantId] = useState<string>('')
   const [selectedUnitForBill, setSelectedUnitForBill] = useState<string>('')
   const [meterReadings, setMeterReadings] = useState<Record<string, {
     water_prev: number
@@ -160,6 +161,38 @@ export default function Billing() {
       }
       return { water_rate: 50, elec_rate: 15 }
     },
+  })
+
+  const { data: tenantsForEditingUnit } = useQuery({
+    queryKey: ['bill-edit-tenants', editingBill?.id, editingBill?.unit_id, editingBill?.tenant_id],
+    queryFn: async () => {
+      if (!editingBill?.unit_id) return []
+
+      const { data: unitTenants, error: unitTenantsError } = await supabase
+        .from('tenants')
+        .select('id, name, status')
+        .eq('unit_id', editingBill.unit_id)
+        .order('name', { ascending: true })
+
+      if (unitTenantsError) throw unitTenantsError
+
+      const tenantMap = new Map<string, any>()
+      ;(unitTenants || []).forEach((tenant: any) => tenantMap.set(tenant.id, tenant))
+
+      // Include current bill tenant even if no longer assigned to this unit,
+      // so historical bills can still be corrected from the edit form.
+      if (editingBill?.tenant_id && !tenantMap.has(editingBill.tenant_id)) {
+        const { data: billTenant } = await supabase
+          .from('tenants')
+          .select('id, name, status')
+          .eq('id', editingBill.tenant_id)
+          .maybeSingle()
+        if (billTenant) tenantMap.set(billTenant.id, billTenant)
+      }
+
+      return Array.from(tenantMap.values())
+    },
+    enabled: showEditBillModal && !!editingBill?.unit_id,
   })
 
   const { data: bills, error: billsError, isLoading: billsLoading } = useQuery({
@@ -813,6 +846,7 @@ export default function Billing() {
 
   const handleEditBill = (bill: any) => {
     setEditingBill(bill)
+    setEditingBillTenantId(bill.tenant_id || '')
     setBillFormData({
       water_prev_reading: bill.water_prev_reading?.toString() || '',
       water_current_reading: bill.water_current_reading?.toString() || '',
@@ -913,6 +947,7 @@ export default function Billing() {
     const newStatus = newBalance <= 0 ? 'paid' : amountPaid > 0 ? 'partial' : 'pending'
 
     const updates = {
+      tenant_id: editingBillTenantId || null,
       water_prev_reading: parseFloat(billFormData.water_prev_reading) || 0,
       water_current_reading: parseFloat(billFormData.water_current_reading) || 0,
       water_rate: parseFloat(billFormData.water_rate) || parsedSettings?.water_rate || 50,
@@ -1729,6 +1764,7 @@ export default function Billing() {
         <div className="modal-overlay" onClick={() => {
           setShowEditBillModal(false)
           setEditingBill(null)
+          setEditingBillTenantId('')
           setError(null)
         }}>
           <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
@@ -1756,6 +1792,26 @@ export default function Billing() {
 
               <form onSubmit={handleSaveEditBill} className="space-y-5">
                 <div className="grid grid-cols-2 gap-4">
+                  <div className="col-span-2">
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">
+                      Tenant for this bill
+                    </label>
+                    <select
+                      value={editingBillTenantId}
+                      onChange={(e) => setEditingBillTenantId(e.target.value)}
+                      className="input"
+                    >
+                      <option value="">No tenant selected</option>
+                      {(tenantsForEditingUnit || []).map((tenant: any) => (
+                        <option key={tenant.id} value={tenant.id}>
+                          {tenant.name}{tenant.status && tenant.status !== 'active' ? ` (${tenant.status})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Only tenants assigned to this unit are listed; current bill tenant is included for historical correction.
+                    </p>
+                  </div>
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-2">
                       Water Previous Reading <span className="text-xs text-slate-500 font-normal">(Auto-filled — editable)</span>
