@@ -55,7 +55,7 @@ export default function TenantDetail() {
     queryFn: async () => {
       let query = supabase
         .from('units')
-        .select('id, unit_number, building_id, monthly_rent, status, tenant_id')
+        .select('id, unit_number, building_id, monthly_rent, status, tenant_id, buildings!units_building_id_fkey(name)')
         .eq('status', 'vacant')
         .order('unit_number', { ascending: true })
 
@@ -65,26 +65,9 @@ export default function TenantDetail() {
       if (unitsError) throw unitsError
       const unitRows = units || []
 
-      const buildingIds = Array.from(
-        new Set(unitRows.map((unit: any) => unit.building_id).filter(Boolean))
-      )
-
-      const buildingsById = new Map<string, string>()
-      if (buildingIds.length > 0) {
-        const { data: buildingsData, error: buildingsError } = await supabase
-          .from('buildings')
-          .select('id, name')
-          .in('id', buildingIds)
-
-        if (buildingsError) throw buildingsError
-        (buildingsData || []).forEach((building: any) => {
-          if (building?.id) buildingsById.set(building.id, building.name)
-        })
-      }
-
       return unitRows.map((unit: any) => ({
         ...unit,
-        buildings: unit.building_id ? { name: buildingsById.get(unit.building_id) || '' } : null,
+        buildings: Array.isArray(unit.buildings) ? unit.buildings[0] : unit.buildings,
       }))
     },
     enabled: isMoveModalOpen,
