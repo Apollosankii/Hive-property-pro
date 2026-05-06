@@ -25,7 +25,6 @@ RETURNS TABLE (
   to_unit_id uuid
 )
 LANGUAGE plpgsql
-SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE

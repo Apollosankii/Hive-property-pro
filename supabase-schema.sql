@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS buildings (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL,
   location TEXT NOT NULL,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
   payment_method_label TEXT,
   payment_paybill TEXT,
   payment_account_number TEXT,
@@ -51,6 +52,7 @@ CREATE TABLE IF NOT EXISTS tenants (
   phone TEXT NOT NULL,
   email TEXT,
   unit_id UUID,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
   id_photo_url TEXT,
   status tenant_status NOT NULL DEFAULT 'active',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -62,6 +64,7 @@ CREATE TABLE IF NOT EXISTS units (
   building_id UUID NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
   unit_number TEXT NOT NULL,
   monthly_rent DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
   tenant_id UUID REFERENCES tenants(id) ON DELETE SET NULL,
   status unit_status NOT NULL DEFAULT 'vacant',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -85,6 +88,7 @@ CREATE TABLE IF NOT EXISTS bills (
   unit_id UUID NOT NULL REFERENCES units(id) ON DELETE CASCADE,
   tenant_id UUID REFERENCES tenants(id) ON DELETE SET NULL,
   billing_month DATE NOT NULL,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
   water_prev_reading DECIMAL(10, 2) NOT NULL DEFAULT 0,
   water_current_reading DECIMAL(10, 2) NOT NULL DEFAULT 0,
   water_units_consumed DECIMAL(10, 2) GENERATED ALWAYS AS (GREATEST(0, water_current_reading - water_prev_reading)) STORED,
@@ -122,6 +126,7 @@ CREATE TABLE IF NOT EXISTS payments (
   bill_id UUID NOT NULL REFERENCES bills(id) ON DELETE CASCADE,
   unit_id UUID NOT NULL REFERENCES units(id) ON DELETE CASCADE,
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
   amount DECIMAL(10, 2) NOT NULL,
   payment_method payment_method NOT NULL,
   receipt_url TEXT,
@@ -142,6 +147,11 @@ CREATE INDEX IF NOT EXISTS idx_bills_status ON bills(status);
 CREATE INDEX IF NOT EXISTS idx_payments_bill ON payments(bill_id);
 CREATE INDEX IF NOT EXISTS idx_payments_tenant ON payments(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(payment_date);
+CREATE INDEX IF NOT EXISTS idx_buildings_user_id ON buildings(user_id);
+CREATE INDEX IF NOT EXISTS idx_units_user_id ON units(user_id);
+CREATE INDEX IF NOT EXISTS idx_tenants_user_id ON tenants(user_id);
+CREATE INDEX IF NOT EXISTS idx_bills_user_id ON bills(user_id);
+CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id);
 
 ALTER TABLE buildings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE units ENABLE ROW LEVEL SECURITY;
@@ -149,41 +159,134 @@ ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bills ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Allow all for authenticated users on buildings" ON buildings;
-DROP POLICY IF EXISTS "Allow all for authenticated users on units" ON units;
-DROP POLICY IF EXISTS "Allow all for authenticated users on tenants" ON tenants;
-DROP POLICY IF EXISTS "Allow all for authenticated users on bills" ON bills;
-DROP POLICY IF EXISTS "Allow all for authenticated users on payments" ON payments;
+-- IMPORTANT:
+-- This project is multi-tenant (per-landlord). Do NOT use permissive policies like USING(true).
+-- For existing DBs, run ENFORCE_USER_DATA_ISOLATION.sql to backfill user_id and set policies.
 
-CREATE POLICY "Allow all for authenticated users on buildings"
-  ON buildings FOR ALL
-  TO authenticated
-  USING (true)
-  WITH CHECK (true);
+DROP POLICY IF EXISTS "Users can view their own buildings" ON buildings;
+DROP POLICY IF EXISTS "Users can insert their own buildings" ON buildings;
+DROP POLICY IF EXISTS "Users can update their own buildings" ON buildings;
+DROP POLICY IF EXISTS "Users can delete their own buildings" ON buildings;
 
-CREATE POLICY "Allow all for authenticated users on units"
-  ON units FOR ALL
-  TO authenticated
-  USING (true)
-  WITH CHECK (true);
+DROP POLICY IF EXISTS "Users can view their own units" ON units;
+DROP POLICY IF EXISTS "Users can insert their own units" ON units;
+DROP POLICY IF EXISTS "Users can update their own units" ON units;
+DROP POLICY IF EXISTS "Users can delete their own units" ON units;
 
-CREATE POLICY "Allow all for authenticated users on tenants"
-  ON tenants FOR ALL
-  TO authenticated
-  USING (true)
-  WITH CHECK (true);
+DROP POLICY IF EXISTS "Users can view their own tenants" ON tenants;
+DROP POLICY IF EXISTS "Users can insert their own tenants" ON tenants;
+DROP POLICY IF EXISTS "Users can update their own tenants" ON tenants;
+DROP POLICY IF EXISTS "Users can delete their own tenants" ON tenants;
 
-CREATE POLICY "Allow all for authenticated users on bills"
-  ON bills FOR ALL
-  TO authenticated
-  USING (true)
-  WITH CHECK (true);
+DROP POLICY IF EXISTS "Users can view their own bills" ON bills;
+DROP POLICY IF EXISTS "Users can insert their own bills" ON bills;
+DROP POLICY IF EXISTS "Users can update their own bills" ON bills;
+DROP POLICY IF EXISTS "Users can delete their own bills" ON bills;
 
-CREATE POLICY "Allow all for authenticated users on payments"
-  ON payments FOR ALL
-  TO authenticated
-  USING (true)
-  WITH CHECK (true);
+DROP POLICY IF EXISTS "Users can view their own payments" ON payments;
+DROP POLICY IF EXISTS "Users can insert their own payments" ON payments;
+DROP POLICY IF EXISTS "Users can update their own payments" ON payments;
+DROP POLICY IF EXISTS "Users can delete their own payments" ON payments;
+
+CREATE POLICY "Users can view their own buildings"
+  ON buildings FOR SELECT TO authenticated
+  USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert their own buildings"
+  ON buildings FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update their own buildings"
+  ON buildings FOR UPDATE TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can delete their own buildings"
+  ON buildings FOR DELETE TO authenticated
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can view their own units"
+  ON units FOR SELECT TO authenticated
+  USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert their own units"
+  ON units FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update their own units"
+  ON units FOR UPDATE TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can delete their own units"
+  ON units FOR DELETE TO authenticated
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can view their own tenants"
+  ON tenants FOR SELECT TO authenticated
+  USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert their own tenants"
+  ON tenants FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update their own tenants"
+  ON tenants FOR UPDATE TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can delete their own tenants"
+  ON tenants FOR DELETE TO authenticated
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can view their own bills"
+  ON bills FOR SELECT TO authenticated
+  USING (
+    auth.uid() = user_id OR
+    EXISTS (SELECT 1 FROM units u WHERE u.id = bills.unit_id AND u.user_id = auth.uid())
+  );
+CREATE POLICY "Users can insert their own bills"
+  ON bills FOR INSERT TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id OR
+    EXISTS (SELECT 1 FROM units u WHERE u.id = bills.unit_id AND u.user_id = auth.uid())
+  );
+CREATE POLICY "Users can update their own bills"
+  ON bills FOR UPDATE TO authenticated
+  USING (
+    auth.uid() = user_id OR
+    EXISTS (SELECT 1 FROM units u WHERE u.id = bills.unit_id AND u.user_id = auth.uid())
+  )
+  WITH CHECK (
+    auth.uid() = user_id OR
+    EXISTS (SELECT 1 FROM units u WHERE u.id = bills.unit_id AND u.user_id = auth.uid())
+  );
+CREATE POLICY "Users can delete their own bills"
+  ON bills FOR DELETE TO authenticated
+  USING (
+    auth.uid() = user_id OR
+    EXISTS (SELECT 1 FROM units u WHERE u.id = bills.unit_id AND u.user_id = auth.uid())
+  );
+
+CREATE POLICY "Users can view their own payments"
+  ON payments FOR SELECT TO authenticated
+  USING (
+    auth.uid() = user_id OR
+    EXISTS (SELECT 1 FROM units u WHERE u.id = payments.unit_id AND u.user_id = auth.uid())
+  );
+CREATE POLICY "Users can insert their own payments"
+  ON payments FOR INSERT TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id OR
+    EXISTS (SELECT 1 FROM units u WHERE u.id = payments.unit_id AND u.user_id = auth.uid())
+  );
+CREATE POLICY "Users can update their own payments"
+  ON payments FOR UPDATE TO authenticated
+  USING (
+    auth.uid() = user_id OR
+    EXISTS (SELECT 1 FROM units u WHERE u.id = payments.unit_id AND u.user_id = auth.uid())
+  )
+  WITH CHECK (
+    auth.uid() = user_id OR
+    EXISTS (SELECT 1 FROM units u WHERE u.id = payments.unit_id AND u.user_id = auth.uid())
+  );
+CREATE POLICY "Users can delete their own payments"
+  ON payments FOR DELETE TO authenticated
+  USING (
+    auth.uid() = user_id OR
+    EXISTS (SELECT 1 FROM units u WHERE u.id = payments.unit_id AND u.user_id = auth.uid())
+  );
 
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('tenant-photos', 'tenant-photos', true)
