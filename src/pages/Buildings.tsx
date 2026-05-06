@@ -390,10 +390,10 @@ export default function Buildings() {
         building: {
           name,
           location,
-          payment_method_label: paymentMethodLabel.trim() || null,
-          payment_paybill: paymentPaybill.trim() || null,
-          payment_account_number: paymentAccountNumber.trim() || null,
-          payment_notes: paymentNotes.trim() || null,
+          payment_method_label: paymentMethodLabel.trim() || undefined,
+          payment_paybill: paymentPaybill.trim() || undefined,
+          payment_account_number: paymentAccountNumber.trim() || undefined,
+          payment_notes: paymentNotes.trim() || undefined,
         },
         units: validUnits,
       })
