@@ -464,11 +464,7 @@ export default function Payments() {
     return unitsList.filter((u: any) => u.building_id === selectedBuildingId)
   }, [unitsList, selectedBuildingId])
 
-  const filteredTenantsForSelect = useMemo(() => {
-    if (!selectedBuildingId) return tenantsList
-    const unitIds = new Set(filteredUnitsForSelect.map((u: any) => u.id))
-    return tenantsList.filter((t: any) => t.unit_id && unitIds.has(t.unit_id))
-  }, [tenantsList, selectedBuildingId, filteredUnitsForSelect])
+  const filteredTenantsForSelect = useMemo(() => tenantsList, [tenantsList])
 
   useEffect(() => {
     if (!selectedEntityId) return

@@ -935,27 +935,27 @@ export default function Billing() {
     const parsedSettings = storedSettings ? JSON.parse(storedSettings) : null
     const waterRate = parseFloat(billFormData.water_rate) || parsedSettings?.water_rate || 50
     const elecRate = parseFloat(billFormData.elec_rate) || parsedSettings?.elec_rate || 15
-    const waterAmount = waterUnits * waterRate
-    const elecAmount = elecUnits * elecRate
-    const rentAmount = parseFloat(billFormData.rent_amount) || 0
-    const arrears = parseFloat(billFormData.arrears_brought_forward) || 0
-    const garbageAmount = parseFloat(billFormData.garbage_amount) || 0
-    const maintenanceAmount = parseFloat(billFormData.maintenance_amount) || 0
-    const otherUtilitiesAmount = parseFloat(billFormData.other_utilities_amount) || 0
+    const waterAmount = Math.round(waterUnits * waterRate)
+    const elecAmount = Math.round(elecUnits * elecRate)
+    const rentAmount = Math.round(parseFloat(billFormData.rent_amount) || 0)
+    const arrears = Math.round(parseFloat(billFormData.arrears_brought_forward) || 0)
+    const garbageAmount = Math.round(parseFloat(billFormData.garbage_amount) || 0)
+    const maintenanceAmount = Math.round(parseFloat(billFormData.maintenance_amount) || 0)
+    const otherUtilitiesAmount = Math.round(parseFloat(billFormData.other_utilities_amount) || 0)
     const totalAmount = waterAmount + elecAmount + rentAmount + arrears + garbageAmount + maintenanceAmount + otherUtilitiesAmount
     const newBalance = totalAmount - amountPaid
     const newStatus = newBalance <= 0 ? 'paid' : amountPaid > 0 ? 'partial' : 'pending'
 
     const updates = {
       tenant_id: editingBillTenantId || null,
-      water_prev_reading: parseFloat(billFormData.water_prev_reading) || 0,
-      water_current_reading: parseFloat(billFormData.water_current_reading) || 0,
+      water_prev_reading: Math.round(parseFloat(billFormData.water_prev_reading) || 0),
+      water_current_reading: Math.round(parseFloat(billFormData.water_current_reading) || 0),
       water_rate: parseFloat(billFormData.water_rate) || parsedSettings?.water_rate || 50,
-      elec_prev_reading: parseFloat(billFormData.elec_prev_reading) || 0,
-      elec_current_reading: parseFloat(billFormData.elec_current_reading) || 0,
+      elec_prev_reading: Math.round(parseFloat(billFormData.elec_prev_reading) || 0),
+      elec_current_reading: Math.round(parseFloat(billFormData.elec_current_reading) || 0),
       elec_rate: parseFloat(billFormData.elec_rate) || parsedSettings?.elec_rate || 15,
-      rent_amount: parseFloat(billFormData.rent_amount) || 0,
-      arrears_brought_forward: parseFloat(billFormData.arrears_brought_forward) || 0,
+      rent_amount: rentAmount,
+      arrears_brought_forward: arrears,
       garbage_amount: garbageAmount,
       maintenance_amount: maintenanceAmount,
       other_utilities_amount: otherUtilitiesAmount,
@@ -1010,18 +1010,21 @@ export default function Billing() {
     const storedSettings = localStorage.getItem('app-settings')
     const parsedSettings = storedSettings ? JSON.parse(storedSettings) : null
     
+    const rentAmount = Math.round(parseFloat(billFormData.rent_amount) || selectedUnit.monthly_rent || 0)
+    const arrearsAmount = Math.round(parseFloat(billFormData.arrears_brought_forward) || 0)
+
     const billData = {
       unit_id: selectedUnitForBill,
       tenant_id: selectedUnit.tenants?.id || null,
       billing_month: selectedMonth + '-01',
-      water_prev_reading: parseFloat(billFormData.water_prev_reading) || 0,
-      water_current_reading: parseFloat(billFormData.water_current_reading) || 0,
+      water_prev_reading: Math.round(parseFloat(billFormData.water_prev_reading) || 0),
+      water_current_reading: Math.round(parseFloat(billFormData.water_current_reading) || 0),
       water_rate: parseFloat(billFormData.water_rate) || parsedSettings?.water_rate || 50,
-      elec_prev_reading: parseFloat(billFormData.elec_prev_reading) || 0,
-      elec_current_reading: parseFloat(billFormData.elec_current_reading) || 0,
+      elec_prev_reading: Math.round(parseFloat(billFormData.elec_prev_reading) || 0),
+      elec_current_reading: Math.round(parseFloat(billFormData.elec_current_reading) || 0),
       elec_rate: parseFloat(billFormData.elec_rate) || parsedSettings?.elec_rate || 15,
-      rent_amount: parseFloat(billFormData.rent_amount) || selectedUnit.monthly_rent || 0,
-      arrears_brought_forward: parseFloat(billFormData.arrears_brought_forward) || 0,
+      rent_amount: rentAmount,
+      arrears_brought_forward: arrearsAmount,
       garbage_amount: garbageAmount,
       maintenance_amount: maintenanceAmount,
       other_utilities_amount: otherUtilitiesAmount,
@@ -1106,9 +1109,9 @@ export default function Billing() {
       return
     }
 
-    const garbageAmount = parseFloat(billFormData.garbage_amount) || 0
-    const maintenanceAmount = parseFloat(billFormData.maintenance_amount) || 0
-    const otherUtilitiesAmount = parseFloat(billFormData.other_utilities_amount) || 0
+    const garbageAmount = Math.round(parseFloat(billFormData.garbage_amount) || 0)
+    const maintenanceAmount = Math.round(parseFloat(billFormData.maintenance_amount) || 0)
+    const otherUtilitiesAmount = Math.round(parseFloat(billFormData.other_utilities_amount) || 0)
 
     if (garbageAmount === 0 && maintenanceAmount === 0 && otherUtilitiesAmount === 0) {
       setError('Please enter at least one utility amount')

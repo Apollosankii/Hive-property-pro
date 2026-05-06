@@ -12,8 +12,9 @@ export function formatCurrency(amount: number | null | undefined): string {
   return new Intl.NumberFormat('en-KE', {
     style: 'currency',
     currency: 'KES',
-    minimumFractionDigits: 2,
-  }).format(value)
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(Math.round(value))
 }
 
 export function formatDate(date: string | Date | null | undefined): string {

@@ -127,8 +127,8 @@ export default function TenantDetail() {
       }
     }
 
-    const oldRent = Math.round((fromMonthly * (oldDays / daysInMonth)) * 100) / 100
-    const newRent = Math.round((toMonthly * (newDays / daysInMonth)) * 100) / 100
+    const oldRent = Math.round(fromMonthly * (oldDays / daysInMonth))
+    const newRent = Math.round(toMonthly * (newDays / daysInMonth))
     return { daysInMonth, oldDays, newDays, oldRent, newRent }
   }, [moveDate, moveProrate, selectedToUnit?.monthly_rent, tenantUnit?.monthly_rent])
 
