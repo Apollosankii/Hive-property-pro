@@ -50,7 +50,7 @@ export default function TenantDetail() {
     staleTime: 0,
   })
 
-  const { data: vacantUnits, error: vacantUnitsError } = useQuery({
+  const { data: vacantUnits, isLoading: vacantUnitsLoading, error: vacantUnitsError } = useQuery({
     queryKey: ['vacant-units-for-move-tenant', moveBuildingId],
     queryFn: async () => {
       let query = supabase
@@ -89,6 +89,8 @@ export default function TenantDetail() {
     },
     enabled: isMoveModalOpen,
     staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: false,
   })
 
   const tenantUnit = useMemo(() => {
@@ -325,6 +327,7 @@ export default function TenantDetail() {
                 setMoveWaterReading('')
                 setMoveElecReading('')
                 setMoveProrate(true)
+                queryClient.invalidateQueries({ queryKey: ['vacant-units-for-move-tenant'] })
                 setIsMoveModalOpen(true)
               }}
               title={!canMoveTenant ? 'Tenant must be active and assigned to a unit' : 'Move tenant to another unit'}
@@ -665,8 +668,15 @@ export default function TenantDetail() {
                     className="input"
                     value={moveToUnitId}
                     onChange={(e) => setMoveToUnitId(e.target.value)}
+                    disabled={vacantUnitsLoading || !!vacantUnitsError}
                   >
-                    <option value="">Select a vacant unit</option>
+                    <option value="" disabled>
+                      {vacantUnitsLoading
+                        ? 'Loading vacant units...'
+                        : vacantUnits && vacantUnits.length > 0
+                        ? 'Select a vacant unit'
+                        : 'No vacant units available'}
+                    </option>
                     {(vacantUnits || []).map((u: any) => (
                       <option key={u.id} value={u.id}>
                         {u.unit_number}
@@ -678,6 +688,9 @@ export default function TenantDetail() {
                     <p className="text-sm text-red-600 mt-2">
                       Failed to load vacant units: {(vacantUnitsError as any)?.message || 'Unknown error'}
                     </p>
+                  )}
+                  {!vacantUnitsLoading && !vacantUnitsError && vacantUnits && vacantUnits.length === 0 && (
+                    <p className="text-sm text-slate-500 mt-2">No vacant units available for the selected building.</p>
                   )}
                 </div>
 
