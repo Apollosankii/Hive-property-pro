@@ -20,7 +20,11 @@ export default function TenantDetail() {
   const [moveProrate, setMoveProrate] = useState(true)
   const [moveError, setMoveError] = useState<string | null>(null)
 
-  const { data: tenant } = useQuery({
+  const {
+    data: tenant,
+    isLoading: tenantLoading,
+    error: tenantError,
+  } = useQuery({
     queryKey: ['tenant', id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -32,6 +36,8 @@ export default function TenantDetail() {
       if (error) throw error
       return data
     },
+    enabled: !!id,
+    retry: 1,
   })
 
   const { data: buildings } = useQuery({
@@ -108,10 +114,64 @@ export default function TenantDetail() {
     enabled: !!id,
   })
 
-  if (!tenant) {
+  if (tenantLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+      </div>
+    )
+  }
+
+  if (tenantError) {
+    return (
+      <div className="space-y-4">
+        <Link
+          to="/tenants"
+          className="inline-flex items-center gap-2 text-gray-600 hover:text-primary-600"
+        >
+          <ArrowLeft size={20} />
+          Back to Tenants
+        </Link>
+
+        <div className="card">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="text-red-600 mt-0.5" size={20} />
+            <div>
+              <h2 className="font-semibold text-gray-900">Failed to load tenant</h2>
+              <p className="text-sm text-gray-600 mt-1">
+                {(tenantError as any)?.message || 'An unexpected error occurred.'}
+              </p>
+              <p className="text-sm text-gray-600 mt-2">
+                Common causes are missing database tables, RLS/auth issues, or the tenant record no longer existing.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!tenant) {
+    return (
+      <div className="space-y-4">
+        <Link
+          to="/tenants"
+          className="inline-flex items-center gap-2 text-gray-600 hover:text-primary-600"
+        >
+          <ArrowLeft size={20} />
+          Back to Tenants
+        </Link>
+        <div className="card">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="text-orange-600 mt-0.5" size={20} />
+            <div>
+              <h2 className="font-semibold text-gray-900">Tenant not found</h2>
+              <p className="text-sm text-gray-600 mt-1">
+                This tenant may have been deleted or you may not have permission to view it.
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
     )
   }
