@@ -433,7 +433,7 @@ export default function CaretakerTenants() {
           </div>
         ) : filteredTenants && filteredTenants.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="table w-full text-xs sm:text-sm">
+            <table className="table responsive-table w-full text-xs sm:text-sm">
               <thead>
                 <tr>
                   <th>Photo</th>
@@ -464,18 +464,18 @@ export default function CaretakerTenants() {
                           </div>
                         )}
                       </td>
-                      <td className="text-xs">
+                      <td data-label="Name" className="text-xs">
                         <Link to={`/tenants/${tenant.id}`} className="font-medium text-primary-600 dark:text-primary-400 hover:underline">
                           {tenant.name}
                         </Link>
                       </td>
-                      <td className="text-xs">{tenant.phone}</td>
-                      <td className="text-xs">
+                      <td data-label="Phone" className="text-xs">{tenant.phone}</td>
+                      <td data-label="Email" className="text-xs">
                         <span className="truncate block max-w-[100px] sm:max-w-none" title={tenant.email || 'N/A'}>
                           {tenant.email || 'N/A'}
                         </span>
                       </td>
-                      <td className="text-xs">
+                      <td data-label="Unit" className="text-xs">
                         {tenant.units ? (
                           <>
                             <span className="whitespace-nowrap">{tenant.units.unit_number}</span>
@@ -487,10 +487,10 @@ export default function CaretakerTenants() {
                           'Unassigned'
                         )}
                       </td>
-                      <td className={`text-xs ${totalBalance > 0 ? 'font-semibold text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                      <td data-label="Balance" className={`text-xs ${totalBalance > 0 ? 'font-semibold text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
                         {formatCurrency(totalBalance)}
                       </td>
-                      <td>
+                      <td data-label="Actions">
                         <button
                           onClick={() => handleEdit(tenant)}
                           className="p-1 text-gray-600 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-zinc-800 rounded transition-all"
@@ -540,7 +540,7 @@ export default function CaretakerTenants() {
           setEditingTenant(null)
           resetForm()
         }}>
-          <div className="modal-content max-w-md" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content max-w-full sm:max-w-md" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
               <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100 mb-4">
                 {editingTenant ? 'Edit Tenant' : 'Onboard New Tenant'}
@@ -730,3 +730,4 @@ export default function CaretakerTenants() {
     </div>
   )
 }
+

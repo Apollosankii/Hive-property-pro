@@ -524,7 +524,7 @@ export default function Dashboard() {
 
       {/* Recent Payments */}
       <div className="card">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-3">
           <div>
             <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-50">Recent Payments</h2>
             <p className="text-sm text-slate-600 dark:text-zinc-400 mt-1">Latest payment transactions</p>
@@ -545,7 +545,7 @@ export default function Dashboard() {
           </div>
         ) : recentPayments && recentPayments.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="table">
+            <table className="table responsive-table">
               <thead>
                 <tr>
                   <th>Date</th>
@@ -558,17 +558,17 @@ export default function Dashboard() {
               <tbody>
                 {recentPayments.map((payment: any) => (
                   <tr key={payment.id}>
-                    <td className="font-medium">
+                    <td data-label="Date" className="font-medium">
                       {new Date(payment.payment_date).toLocaleDateString('en-US', {
                         month: 'short',
                         day: 'numeric',
                         year: 'numeric'
                       })}
                     </td>
-                    <td className="font-medium text-slate-900 dark:text-zinc-50">{payment.tenants?.name || 'N/A'}</td>
-                    <td className="text-slate-600 dark:text-zinc-400">{payment.units?.unit_number || 'N/A'}</td>
-                    <td className="font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(payment.amount)}</td>
-                    <td>
+                    <td data-label="Tenant" className="font-medium text-slate-900 dark:text-zinc-50">{payment.tenants?.name || 'N/A'}</td>
+                    <td data-label="Unit" className="text-slate-600 dark:text-zinc-400">{payment.units?.unit_number || 'N/A'}</td>
+                    <td data-label="Amount" className="font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(payment.amount)}</td>
+                    <td data-label="Method">
                       <span className="badge badge-info capitalize">
                         {payment.payment_method}
                       </span>

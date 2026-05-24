@@ -196,7 +196,7 @@ export default function Expenses() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-4xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 dark:from-zinc-50 dark:to-zinc-200 bg-clip-text text-transparent">
             Expenses
@@ -217,7 +217,7 @@ export default function Expenses() {
 
       {/* Monthly Filter */}
       <div className="card">
-        <div className="flex items-center gap-4">
+        <div className="flex flex-col sm:flex-row gap-4 sm:items-center">
           <label className="text-sm font-semibold text-slate-700 dark:text-zinc-200">
             Filter by Month:
           </label>
@@ -233,7 +233,7 @@ export default function Expenses() {
       {expenses && filteredExpenses.length > 0 ? (
         <div className="card">
           <div className="overflow-x-auto">
-            <table className="table">
+            <table className="table responsive-table">
               <thead>
                 <tr>
                   <th>Date</th>
@@ -248,17 +248,17 @@ export default function Expenses() {
               <tbody>
                 {filteredExpenses.map((expense: any) => (
                   <tr key={expense.id}>
-                    <td>{formatDate(expense.expense_date)}</td>
-                    <td className="font-medium">{expense.description}</td>
-                    <td>
+                    <td data-label="Date">{formatDate(expense.expense_date)}</td>
+                    <td data-label="Description" className="font-medium">{expense.description}</td>
+                    <td data-label="Category">
                       <span className="badge badge-info">{expense.category}</span>
                     </td>
-                    <td className="font-semibold">{formatCurrency(expense.amount)}</td>
-                    <td>{expense.vendor || '-'}</td>
-                    <td>
+                    <td data-label="Amount" className="font-semibold">{formatCurrency(expense.amount)}</td>
+                    <td data-label="Vendor">{expense.vendor || '-'}</td>
+                    <td data-label="Building/Unit">
                       {expense.buildings?.name || expense.units?.unit_number || '-'}
                     </td>
-                    <td>
+                    <td data-label="Actions">
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => handleOpenModal(expense)}
@@ -309,7 +309,7 @@ export default function Expenses() {
           setEditingExpense(null)
           setError(null)
         }}>
-          <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content max-w-full sm:max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
               <h2 className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mb-2">
                 {editingExpense ? 'Edit Expense' : 'Add Expense'}
@@ -477,4 +477,5 @@ export default function Expenses() {
     </div>
   )
 }
+
 

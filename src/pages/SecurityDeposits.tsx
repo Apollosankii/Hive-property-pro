@@ -968,17 +968,17 @@ export default function SecurityDeposits() {
 
       {!depositsLoading && deposits && deposits.length > 0 && (
         <div>
-          <div className="p-3 flex items-center justify-end">
+          <div className="p-3 flex flex-col sm:flex-row sm:items-center justify-end gap-3">
             <input
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search deposits..."
-              className="input w-64"
+              className="input w-full sm:w-64"
             />
           </div>
           <div className="card overflow-x-auto w-full">
-            <table className="table w-full text-xs sm:text-sm">
+            <table className="table responsive-table w-full text-xs sm:text-sm">
               <thead>
                 <tr>
                   <th className="min-w-[120px]">Tenant</th>
@@ -994,7 +994,7 @@ export default function SecurityDeposits() {
               <tbody>
                 {visibleDeposits.map((deposit: any) => (
                   <tr key={deposit.id}>
-                    <td className="text-slate-700 dark:text-slate-300">
+                    <td data-label="Tenant" className="text-slate-700 dark:text-slate-300">
                       <div className="flex flex-col">
                         <span className="font-semibold">{deposit.tenants?.name || 'N/A'}</span>
                         <span className="text-xs text-slate-500 dark:text-slate-400">
@@ -1002,19 +1002,19 @@ export default function SecurityDeposits() {
                         </span>
                       </div>
                     </td>
-                    <td className="text-slate-600 dark:text-slate-400">
+                    <td data-label="Unit" className="text-slate-600 dark:text-slate-400">
                       {deposit.units?.unit_number} ({deposit.units?.buildings?.name})
                     </td>
-                    <td className="font-bold text-slate-900 dark:text-slate-100">
+                    <td data-label="Amount" className="font-bold text-slate-900 dark:text-slate-100">
                       {formatCurrency(deposit.amount)}
                     </td>
-                    <td className="font-medium text-red-600 dark:text-red-400">
+                    <td data-label="Deductions" className="font-medium text-red-600 dark:text-red-400">
                       {formatCurrency(deposit.total_deductions || 0)}
                     </td>
-                    <td className="font-bold text-emerald-600 dark:text-emerald-400">
+                    <td data-label="Refund" className="font-bold text-emerald-600 dark:text-emerald-400">
                       {formatCurrency(deposit.refund_amount || 0)}
                     </td>
-                    <td>
+                    <td data-label="Status">
                       <span
                         className={`badge text-[10px] px-1.5 py-0.5 ${
                           deposit.status === 'active'
@@ -1029,10 +1029,10 @@ export default function SecurityDeposits() {
                         {deposit.status}
                       </span>
                     </td>
-                    <td className="text-slate-600 dark:text-slate-400">
+                    <td data-label="Date Deposited" className="text-slate-600 dark:text-slate-400">
                       {formatDate(deposit.date_deposited)}
                     </td>
-                    <td>
+                    <td data-label="Actions">
                       <div className="flex items-center gap-1">
                         {deposit.status === 'active' && (
                           <button
@@ -1101,9 +1101,9 @@ export default function SecurityDeposits() {
           setFinalElecReading('')
           setIsEditingLeaseEnd(false)
         }}>
-          <div className="modal-content max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content max-w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
-              <div className="flex items-start justify-between mb-6">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between mb-6 gap-3">
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mb-2">
                     {isEditingLeaseEnd ? 'Edit' : 'Process'} Lease End
@@ -1445,7 +1445,7 @@ export default function SecurityDeposits() {
       {/* Deductions Detail Modal */}
       {selectedDeposit && !showLeaseEndModal && (
         <div className="modal-overlay" onClick={() => setSelectedDeposit(null)}>
-          <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content max-w-full sm:max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
               <h2 className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mb-2">
                 Security Deposit Details
@@ -1454,7 +1454,7 @@ export default function SecurityDeposits() {
                 {selectedDeposit.tenants?.name || 'Tenant'} - {selectedDeposit.units?.unit_number}
               </p>
 
-              <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                 <div className="p-4 bg-slate-50 dark:bg-zinc-900 rounded-xl">
                   <p className="text-sm text-slate-600 dark:text-zinc-400 mb-1">Deposit Amount</p>
                   <p className="text-2xl font-bold text-slate-900 dark:text-zinc-100">{formatCurrency(selectedDeposit.amount)}</p>
@@ -1504,9 +1504,9 @@ export default function SecurityDeposits() {
           setShowReceiptModal(false)
           setSettlementReceipt(null)
         }}>
-          <div className="modal-content max-w-4xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content max-w-full sm:max-w-4xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
-              <div className="flex items-start justify-between mb-6">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between mb-6 gap-3">
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mb-2">
                     Settlement Receipt
@@ -1723,4 +1723,5 @@ export default function SecurityDeposits() {
     </div>
   )
 }
+
 

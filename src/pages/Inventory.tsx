@@ -166,7 +166,7 @@ export default function Inventory() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-4xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 dark:from-zinc-50 dark:to-zinc-200 bg-clip-text text-transparent">
             Inventory
@@ -192,7 +192,7 @@ export default function Inventory() {
       {inventory && inventory.length > 0 ? (
         <div className="card">
           <div className="overflow-x-auto">
-            <table className="table">
+            <table className="table responsive-table">
               <thead>
                 <tr>
                   <th>Item Name</th>
@@ -208,17 +208,17 @@ export default function Inventory() {
               <tbody>
                 {inventory.map((item: Inventory) => (
                   <tr key={item.id}>
-                    <td className="font-semibold">{item.item_name}</td>
-                    <td>{item.category || '-'}</td>
-                    <td>
+                    <td data-label="Item Name" className="font-semibold">{item.item_name}</td>
+                    <td data-label="Category">{item.category || '-'}</td>
+                    <td data-label="Quantity">
                       {item.quantity} {item.unit}
                       {item.quantity <= item.min_quantity && (
                         <span className="ml-2 text-xs text-amber-600 dark:text-amber-400">⚠ Low</span>
                       )}
                     </td>
-                    <td>{formatCurrency(item.unit_cost)}</td>
-                    <td className="font-semibold">{formatCurrency(item.total_value)}</td>
-                    <td>
+                    <td data-label="Unit Cost">{formatCurrency(item.unit_cost)}</td>
+                    <td data-label="Total Value" className="font-semibold">{formatCurrency(item.total_value)}</td>
+                    <td data-label="Status">
                       <span className={`badge ${
                         item.status === 'in_stock' ? 'badge-success' :
                         item.status === 'low_stock' ? 'badge-warning' :
@@ -227,8 +227,8 @@ export default function Inventory() {
                         {item.status.replace('_', ' ')}
                       </span>
                     </td>
-                    <td>{item.location || '-'}</td>
-                    <td>
+                    <td data-label="Location">{item.location || '-'}</td>
+                    <td data-label="Actions">
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => {
@@ -284,7 +284,7 @@ export default function Inventory() {
           setEditingItem(null)
           setError(null)
         }}>
-          <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content max-w-full sm:max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
               <h2 className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mb-2">
                 {editingItem ? 'Edit Inventory Item' : 'Add Inventory Item'}
@@ -559,7 +559,7 @@ function InventoryTransactionModal({ item, onClose }: { item: Inventory; onClose
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-content max-w-full sm:max-w-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="p-6">
           <h2 className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mb-2">
             Add Transaction - {item.item_name}
@@ -687,4 +687,5 @@ function InventoryTransactionModal({ item, onClose }: { item: Inventory; onClose
     </div>
   )
 }
+
 

@@ -222,7 +222,7 @@ export default function Layout() {
       </button>
 
       {/* Main content */}
-      <main className={`flex-1 pt-16 lg:pt-0 h-screen flex flex-col overflow-hidden ${sidebarOpen ? 'lg:ml-72' : 'lg:ml-20'} transition-all duration-300`}>
+      <main className={`flex-1 pt-16 lg:pt-0 min-h-screen flex flex-col overflow-hidden ${sidebarOpen ? 'lg:ml-72' : 'lg:ml-20'} transition-all duration-300`}>
         <div className="flex-1 overflow-y-auto overflow-x-hidden">
           <div className="p-4 lg:p-6 max-w-7xl mx-auto w-full">
             <Outlet />

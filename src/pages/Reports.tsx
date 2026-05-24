@@ -657,9 +657,9 @@ export default function Reports() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 dark:from-slate-100 dark:to-slate-300 bg-clip-text text-transparent">Reports</h1>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <button
             onClick={handleExportExcel}
             className="btn btn-primary flex items-center gap-2"
@@ -742,8 +742,8 @@ export default function Reports() {
               </div>
             )}
 
-            <div className="flex items-center gap-4">
-              <div>
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="flex-1 min-w-0">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Start Date
                 </label>
@@ -754,7 +754,7 @@ export default function Reports() {
                   className="input"
                 />
               </div>
-              <div>
+              <div className="flex-1 min-w-0">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   End Date
                 </label>
@@ -796,7 +796,7 @@ export default function Reports() {
             )}
 
             <div className="overflow-x-auto">
-              <table className="table">
+              <table className="table responsive-table">
                 <thead>
                   <tr>
                     <th>Date</th>
@@ -809,15 +809,15 @@ export default function Reports() {
                 <tbody>
                   {revenueData?.payments.map((payment: any) => (
                     <tr key={payment.id}>
-                      <td>{formatDate(payment.payment_date)}</td>
-                      <td>{payment.tenants?.name || 'N/A'}</td>
-                      <td>
+                      <td data-label="Date">{formatDate(payment.payment_date)}</td>
+                      <td data-label="Tenant">{payment.tenants?.name || 'N/A'}</td>
+                      <td data-label="Unit">
                         {payment.units?.unit_number} ({payment.units?.buildings?.name})
                       </td>
-                      <td className="font-semibold">
+                      <td data-label="Amount" className="font-semibold">
                         {formatCurrency(payment.amount)}
                       </td>
-                      <td>
+                      <td data-label="Method">
                         <span className="badge badge-info capitalize">
                           {payment.payment_method}
                         </span>
@@ -851,7 +851,7 @@ export default function Reports() {
 
             {arrearsData && (
               <>
-                <div className="grid grid-cols-4 gap-4 mb-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                   <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                     <p className="text-sm text-gray-600 dark:text-blue-300">Current</p>
                     <p className="text-xl font-bold text-slate-900 dark:text-blue-100">
@@ -910,7 +910,7 @@ export default function Reports() {
             )}
 
             <div className="overflow-x-auto">
-              <table className="table">
+              <table className="table responsive-table">
                 <thead>
                   <tr>
                     <th>Billing Month</th>
@@ -924,16 +924,16 @@ export default function Reports() {
                 <tbody>
                   {arrearsData?.bills.map((bill: any) => (
                     <tr key={bill.id}>
-                      <td>{bill.billing_month}</td>
-                      <td>{bill.tenants?.name || 'N/A'}</td>
-                      <td>
+                      <td data-label="Billing Month">{bill.billing_month}</td>
+                      <td data-label="Tenant">{bill.tenants?.name || 'N/A'}</td>
+                      <td data-label="Unit">
                         {bill.units?.unit_number} ({bill.units?.buildings?.name})
                       </td>
-                      <td>{formatCurrency(bill.total_amount)}</td>
-                      <td className="text-green-600">
+                      <td data-label="Total">{formatCurrency(bill.total_amount)}</td>
+                      <td data-label="Paid" className="text-green-600">
                         {formatCurrency(bill.amount_paid)}
                       </td>
-                      <td className="font-semibold text-red-600">
+                      <td data-label="Balance" className="font-semibold text-red-600">
                         {formatCurrency(bill.balance)}
                       </td>
                     </tr>
@@ -955,7 +955,7 @@ export default function Reports() {
 
             {occupancyData && (
               <>
-                <div className="grid grid-cols-3 gap-4 mb-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
                   <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                     <p className="text-sm text-gray-600 dark:text-blue-300">Total Units</p>
                     <p className="text-xl font-bold text-slate-900 dark:text-blue-100">{occupancyData.total}</p>
@@ -982,7 +982,7 @@ export default function Reports() {
                 </div>
 
             <div className="overflow-x-auto">
-              <table className="table">
+              <table className="table responsive-table">
                 <thead>
                   <tr>
                     <th>Unit Number</th>
@@ -995,9 +995,9 @@ export default function Reports() {
                 <tbody>
                   {occupancyData.units.map((unit: any) => (
                     <tr key={unit.id}>
-                      <td className="font-medium">{unit.unit_number}</td>
-                      <td>{unit.buildings?.name || 'N/A'}</td>
-                      <td>
+                      <td data-label="Unit Number" className="font-medium">{unit.unit_number}</td>
+                      <td data-label="Building">{unit.buildings?.name || 'N/A'}</td>
+                      <td data-label="Status">
                         <span
                           className={`badge ${
                             unit.status === 'occupied'
@@ -1008,8 +1008,8 @@ export default function Reports() {
                           {unit.status}
                         </span>
                       </td>
-                      <td>{unit.tenants?.name || 'Vacant'}</td>
-                      <td className="font-semibold">
+                      <td data-label="Tenant">{unit.tenants?.name || 'Vacant'}</td>
+                      <td data-label="Monthly Rent" className="font-semibold">
                         {formatCurrency(unit.monthly_rent)}
                       </td>
                     </tr>
@@ -1024,12 +1024,12 @@ export default function Reports() {
 
         {reportType === 'salaries' && (
           <div className="space-y-6">
-            <div className="flex items-center gap-4">
-              <div>
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="flex-1 min-w-0">
                 <label className="block text-sm font-medium text-gray-700 dark:text-zinc-200 mb-2">Start Date</label>
                 <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="input" />
               </div>
-              <div>
+              <div className="flex-1 min-w-0">
                 <label className="block text-sm font-medium text-gray-700 dark:text-zinc-200 mb-2">End Date</label>
                 <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="input" />
               </div>
@@ -1039,7 +1039,7 @@ export default function Reports() {
               <p className="text-xl font-bold text-blue-900 dark:text-blue-200">{formatCurrency(salariesData?.total || 0)}</p>
             </div>
             <div className="overflow-x-auto">
-              <table className="table">
+              <table className="table responsive-table">
                 <thead>
                   <tr>
                     <th>Month</th>
@@ -1057,12 +1057,12 @@ export default function Reports() {
                 <tbody>
                   {salariesData?.salaries.map((salary: any) => (
                     <tr key={salary.id}>
-                      <td>{new Date(salary.salary_month).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</td>
-                      <td className="font-medium">{salary.employees?.name || 'N/A'}</td>
-                      <td>{salary.employees?.position || 'N/A'}</td>
-                      <td>{formatCurrency(salary.base_salary)}</td>
-                      <td>{formatCurrency(salary.bonuses)}</td>
-                      <td>{formatCurrency(salary.deductions)}</td>
+                      <td data-label="Month">{new Date(salary.salary_month).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</td>
+                      <td data-label="Employee" className="font-medium">{salary.employees?.name || 'N/A'}</td>
+                      <td data-label="Position">{salary.employees?.position || 'N/A'}</td>
+                      <td data-label="Base Salary">{formatCurrency(salary.base_salary)}</td>
+                      <td data-label="Bonuses">{formatCurrency(salary.bonuses)}</td>
+                      <td data-label="Deductions">{formatCurrency(salary.deductions)}</td>
                       <td className="font-semibold">{formatCurrency(salary.total_amount)}</td>
                       <td>{formatCurrency(salary.amount_paid)}</td>
                       <td>{formatCurrency(salary.balance)}</td>
@@ -1084,12 +1084,12 @@ export default function Reports() {
 
         {reportType === 'expenses' && (
           <div className="space-y-6">
-            <div className="flex items-center gap-4">
-              <div>
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="flex-1 min-w-0">
                 <label className="block text-sm font-medium text-gray-700 dark:text-zinc-200 mb-2">Start Date</label>
                 <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="input" />
               </div>
-              <div>
+              <div className="flex-1 min-w-0">
                 <label className="block text-sm font-medium text-gray-700 dark:text-zinc-200 mb-2">End Date</label>
                 <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="input" />
               </div>
@@ -1119,7 +1119,7 @@ export default function Reports() {
             )}
 
             <div className="overflow-x-auto">
-              <table className="table">
+              <table className="table responsive-table">
                 <thead>
                   <tr>
                     <th>Date</th>
@@ -1132,11 +1132,11 @@ export default function Reports() {
                 <tbody>
                   {expensesData?.expenses.map((expense: any) => (
                     <tr key={expense.id}>
-                      <td>{formatDate(expense.expense_date)}</td>
-                      <td className="font-medium">{expense.description}</td>
-                      <td><span className="badge badge-info">{expense.category}</span></td>
-                      <td className="font-semibold">{formatCurrency(expense.amount)}</td>
-                      <td>{expense.vendor || '-'}</td>
+                      <td data-label="Date">{formatDate(expense.expense_date)}</td>
+                      <td data-label="Description" className="font-medium">{expense.description}</td>
+                      <td data-label="Category"><span className="badge badge-info">{expense.category}</span></td>
+                      <td data-label="Amount" className="font-semibold">{formatCurrency(expense.amount)}</td>
+                      <td data-label="Vendor">{expense.vendor || '-'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1147,7 +1147,7 @@ export default function Reports() {
 
         {reportType === 'inventory' && (
           <div className="space-y-6">
-            <div className="grid grid-cols-3 gap-4 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
               <div className="p-4 bg-blue-50 dark:bg-blue-950/40 rounded-lg">
                 <p className="text-sm text-gray-600 dark:text-zinc-400">Total Items</p>
                 <p className="text-xl font-bold">{inventoryData?.items.length || 0}</p>
@@ -1162,7 +1162,7 @@ export default function Reports() {
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="table">
+              <table className="table responsive-table">
                 <thead>
                   <tr>
                     <th>Item Name</th>
@@ -1177,12 +1177,12 @@ export default function Reports() {
                 <tbody>
                   {inventoryData?.items.map((item: any) => (
                     <tr key={item.id}>
-                      <td className="font-medium">{item.item_name}</td>
-                      <td>{item.category || '-'}</td>
-                      <td>{item.quantity} {item.unit}</td>
-                      <td>{formatCurrency(item.unit_cost)}</td>
-                      <td className="font-semibold">{formatCurrency(item.total_value)}</td>
-                      <td>
+                      <td data-label="Item Name" className="font-medium">{item.item_name}</td>
+                      <td data-label="Category">{item.category || '-'}</td>
+                      <td data-label="Quantity">{item.quantity} {item.unit}</td>
+                      <td data-label="Unit Cost">{formatCurrency(item.unit_cost)}</td>
+                      <td data-label="Total Value" className="font-semibold">{formatCurrency(item.total_value)}</td>
+                      <td data-label="Status">
                         <span className={`badge ${
                           item.status === 'in_stock' ? 'badge-success' :
                           item.status === 'low_stock' ? 'badge-warning' : 'badge-danger'
@@ -1201,7 +1201,7 @@ export default function Reports() {
 
         {reportType === 'financial' && (
           <div className="space-y-6">
-            <div className="flex items-center gap-4">
+            <div className="flex flex-col sm:flex-row gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-zinc-200 mb-2">Start Date</label>
                 <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="input" />
@@ -1211,7 +1211,7 @@ export default function Reports() {
                 <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="input" />
               </div>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
               <div className="p-4 bg-green-50 dark:bg-green-950/40 rounded-lg">
                 <p className="text-sm text-gray-600 dark:text-zinc-400 mb-1">Total Revenue</p>
                 <p className="text-lg font-bold text-green-600 dark:text-green-400">{formatCurrency(financialData?.revenue || 0)}</p>
@@ -1331,7 +1331,7 @@ export default function Reports() {
 
         {reportType === 'refunds' && (
           <div className="space-y-6">
-            <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex flex-col sm:flex-row gap-4 flex-wrap">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-zinc-200 mb-2">Start Date</label>
                 <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="input" />
@@ -1371,7 +1371,7 @@ export default function Reports() {
               </p>
             </div>
             <div className="overflow-x-auto">
-              <table className="table">
+              <table className="table responsive-table">
                 <thead>
                   <tr>
                     <th>Date Refunded</th>
@@ -1385,22 +1385,22 @@ export default function Reports() {
                 <tbody>
                   {refundsData?.refunds.map((refund: any) => (
                     <tr key={refund.id}>
-                      <td>{formatDate(refund.updated_at)}</td>
-                      <td>
+                      <td data-label="Date Refunded">{formatDate(refund.updated_at)}</td>
+                      <td data-label="Tenant">
                         <div>
                           <div className="font-medium">{refund.tenants?.name || 'N/A'}</div>
                           <div className="text-xs text-slate-500">{refund.tenants?.phone || ''}</div>
                         </div>
                       </td>
-                      <td>
+                      <td data-label="Unit">
                         {refund.units?.unit_number || 'N/A'} 
                         {refund.units?.buildings?.name && ` (${refund.units.buildings.name})`}
                       </td>
-                      <td>{formatCurrency(refund.amount)}</td>
-                      <td className="text-red-600 dark:text-red-400">
+                      <td data-label="Deposit Amount">{formatCurrency(refund.amount)}</td>
+                      <td data-label="Deductions" className="text-red-600 dark:text-red-400">
                         {formatCurrency(refund.total_deductions || 0)}
                       </td>
-                      <td className="font-bold text-emerald-600 dark:text-emerald-400">
+                      <td data-label="Refund Amount" className="font-bold text-emerald-600 dark:text-emerald-400">
                         {formatCurrency(refund.refund_amount || 0)}
                       </td>
                     </tr>

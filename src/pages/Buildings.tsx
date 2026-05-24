@@ -559,7 +559,7 @@ export default function Buildings() {
           setUnits([])
           setError(null)
         }}>
-          <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content max-w-full sm:max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="p-6 max-h-[90vh] overflow-y-auto">
               <h2 className="text-2xl font-bold text-slate-900 mb-6">
                 {editingBuilding ? 'Edit Building' : 'Add Building'}
@@ -677,8 +677,8 @@ export default function Buildings() {
                     <div className="space-y-3">
                       {units.map((unit, index) => (
                         <div key={index} className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-                          <div className="flex items-start gap-3">
-                            <div className="flex-1 grid grid-cols-2 gap-3">
+                          <div className="flex flex-col gap-3">
+                            <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
                               <div>
                                 <label className="block text-xs font-medium text-slate-600 mb-1.5">
                                   Unit Number
@@ -770,5 +770,6 @@ export default function Buildings() {
     </div>
   )
 }
+
 
 

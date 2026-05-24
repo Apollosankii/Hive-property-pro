@@ -623,7 +623,7 @@ export default function Employees() {
       {unifiedEmployees && unifiedEmployees.length > 0 ? (
         <div className="card">
           <div className="overflow-x-auto">
-            <table className="table">
+            <table className="table responsive-table">
               <thead>
                 <tr>
                   <th>Name</th>
@@ -644,7 +644,7 @@ export default function Employees() {
                   const caretaker = employee.caretaker
                   return (
                     <tr key={employee.id}>
-                      <td className="font-semibold text-xs">
+                      <td data-label="Name" className="font-semibold text-xs">
                         <div className="flex items-center gap-2">
                           <span className="truncate block max-w-[100px] sm:max-w-none" title={employee.name}>
                             {employee.name}
@@ -656,22 +656,22 @@ export default function Employees() {
                           )}
                         </div>
                       </td>
-                      <td className="text-xs">
+                      <td data-label="Position" className="text-xs">
                         <span className="truncate block max-w-[80px] sm:max-w-none" title={employee.position}>
                           {employee.position}
                         </span>
                       </td>
-                      <td className="text-xs">{employee.department || '-'}</td>
-                      <td className="text-xs">{employee.phone || '-'}</td>
-                      <td className="text-xs">{employee.email || '-'}</td>
-                      <td>
+                      <td data-label="Department" className="text-xs">{employee.department || '-'}</td>
+                      <td data-label="Phone" className="text-xs">{employee.phone || '-'}</td>
+                      <td data-label="Email" className="text-xs">{employee.email || '-'}</td>
+                      <td data-label="Portal Access">
                         {employee.isCaretaker ? (
                           <span className="badge badge-success text-[10px] px-1.5 py-0.5">Yes</span>
                         ) : (
                           <span className="text-xs text-slate-400 dark:text-zinc-600">No</span>
                         )}
                       </td>
-                      <td className="text-xs">
+                      <td data-label="Assigned Properties" className="text-xs">
                         {employee.caretaker?.buildings && employee.caretaker.buildings.length > 0 ? (
                           <div className="flex flex-wrap gap-1">
                             {employee.caretaker.buildings.map((building: Building) => (
@@ -691,9 +691,9 @@ export default function Employees() {
                           <span className="text-xs text-slate-400 dark:text-zinc-600">-</span>
                         )}
                       </td>
-                      <td className="text-xs">{formatCurrency(employee.salary_amount)}</td>
-                      <td className="text-xs">{formatDate(employee.hire_date)}</td>
-                      <td>
+                      <td data-label="Salary" className="text-xs">{formatCurrency(employee.salary_amount)}</td>
+                      <td data-label="Hire Date" className="text-xs">{formatDate(employee.hire_date)}</td>
+                      <td data-label="Status">
                         <span className={`badge text-[10px] px-1.5 py-0.5 ${
                           employee.status === 'active' ? 'badge-success' :
                           employee.status === 'inactive' ? 'badge-warning' :
@@ -702,7 +702,7 @@ export default function Employees() {
                           {employee.status}
                         </span>
                       </td>
-                      <td>
+                      <td data-label="Actions">
                         <div className="flex items-center gap-1">
                           {employee.salary_amount > 0 && (
                             <button
@@ -780,7 +780,7 @@ export default function Employees() {
             resetForm()
           }
         }}>
-          <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content max-w-full sm:max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
               <h2 className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mb-2">
                 {editingEmployee ? 'Edit Employee' : 'Add Employee'}
@@ -1140,7 +1140,7 @@ export default function Employees() {
           setShowCredentialsModal(false)
           setNewCaretakerCredentials(null)
         }}>
-          <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content max-w-full sm:max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
               <h2 className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mb-2">
                 Password Reset Successful
@@ -1319,7 +1319,7 @@ function SalaryManagement({ employee, onClose }: { employee: Employee; onClose: 
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-content max-w-full sm:max-w-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="p-6">
           <h2 className="text-2xl font-bold text-slate-900 dark:text-zinc-50 mb-2">
             Manage Salary - {employee.name}
@@ -1504,4 +1504,5 @@ function SalaryManagement({ employee, onClose }: { employee: Employee; onClose: 
     </div>
   )
 }
+
 

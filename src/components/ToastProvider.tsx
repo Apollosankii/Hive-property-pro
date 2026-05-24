@@ -46,13 +46,13 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     <ToastContext.Provider value={value}>
       {children}
 
-      {/* Toaster container - bottom-right */}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2 max-w-sm">
+      {/* Toaster container - bottom on mobile, bottom-right on larger screens */}
+      <div className="fixed bottom-4 left-1/2 z-50 flex flex-col items-center sm:items-end gap-2 max-w-[calc(100vw-2rem)] sm:max-w-sm -translate-x-1/2 sm:left-auto sm:right-4 sm:translate-x-0">
         {toasts.map((t) => (
           <div
             key={t.id}
             role="status"
-            className={`w-full max-w-sm shadow-lg rounded-lg overflow-hidden transform transition-all duration-200`}>
+            className={`w-full max-w-full sm:max-w-sm shadow-lg rounded-lg overflow-hidden transform transition-all duration-200`}>
             <div className={`px-4 py-3 flex gap-3 items-start ${t.type === 'error' ? 'bg-red-600 text-white' : t.type === 'success' ? 'bg-green-600 text-white' : 'bg-slate-800 text-white'}`}>
               <div className="flex-1">
                 {t.title && <div className="font-semibold text-sm">{t.title}</div>}

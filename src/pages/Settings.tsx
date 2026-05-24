@@ -315,7 +315,7 @@ export default function Settings() {
       </div>
 
       <div className="card">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-3">
           <div>
             <h2 className="text-xl font-bold text-slate-900">Utility Types</h2>
             <p className="text-sm text-slate-600 mt-1">
@@ -338,7 +338,7 @@ export default function Settings() {
           </div>
         ) : utilityTypes && utilityTypes.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="table">
+            <table className="table responsive-table">
               <thead>
                 <tr>
                   <th>Name</th>
@@ -353,17 +353,17 @@ export default function Settings() {
               <tbody>
                 {utilityTypes.map((utility: UtilityType) => (
                   <tr key={utility.id}>
-                    <td className="font-semibold">{utility.name}</td>
-                    <td>{utility.rate.toLocaleString()} KES</td>
-                    <td>{utility.unit_name}</td>
-                    <td className="text-slate-600">{utility.description || '-'}</td>
-                    <td>{utility.display_order}</td>
-                    <td>
+                    <td data-label="Name" className="font-semibold">{utility.name}</td>
+                    <td data-label="Rate">{utility.rate.toLocaleString()} KES</td>
+                    <td data-label="Unit">{utility.unit_name}</td>
+                    <td data-label="Description" className="text-slate-600">{utility.description || '-'}</td>
+                    <td data-label="Order">{utility.display_order}</td>
+                    <td data-label="Status">
                       <span className={`badge ${utility.is_active ? 'badge-success' : 'badge-warning'}`}>
                         {utility.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
-                    <td>
+                    <td data-label="Actions">
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => toggleUtilityActiveMutation.mutate({ 
@@ -424,7 +424,7 @@ export default function Settings() {
           setEditingUtility(null)
           setError(null)
         }}>
-          <div className="modal-content max-w-lg" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content max-w-full sm:max-w-lg" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
               <h2 className="text-2xl font-bold text-slate-900 mb-2">
                 {editingUtility ? 'Edit Utility Type' : 'Add Utility Type'}
@@ -464,7 +464,7 @@ export default function Settings() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-2">
                       Rate (KES) <span className="text-red-500">*</span>
@@ -565,3 +565,4 @@ export default function Settings() {
     </div>
   )
 }
+

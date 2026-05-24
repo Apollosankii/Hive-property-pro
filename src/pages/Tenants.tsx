@@ -610,7 +610,7 @@ export default function Tenants() {
           </div>
         ) : filteredTenants && filteredTenants.length > 0 ? (
           <div className="overflow-x-auto w-full">
-            <table className="table w-full text-xs sm:text-sm">
+            <table className="table responsive-table w-full text-xs sm:text-sm">
               <thead>
                 <tr>
                   <th className="w-[60px] sm:w-[80px]">Photo</th>
@@ -631,7 +631,7 @@ export default function Tenants() {
                   const totalBalance = billsArray.reduce((sum: number, b: any) => sum + (b.balance || 0), 0)
                   return (
                     <tr key={tenant.id}>
-                      <td>
+                      <td data-label="Photo">
                         {tenant.id_photo_url ? (
                           <img
                             src={tenant.id_photo_url}
@@ -644,18 +644,18 @@ export default function Tenants() {
                           </div>
                         )}
                       </td>
-                      <td className="text-xs">
+                      <td data-label="Name" className="text-xs">
                         <Link to={`/tenants/${tenant.id}`} className="font-medium text-primary-600 dark:text-primary-400 hover:underline truncate block max-w-[80px] sm:max-w-none" title={tenant.name}>
                           {tenant.name}
                         </Link>
                       </td>
-                      <td className="text-xs">{tenant.phone}</td>
-                      <td className="text-xs">
+                      <td data-label="Phone" className="text-xs">{tenant.phone}</td>
+                      <td data-label="Email" className="text-xs">
                         <span className="truncate block max-w-[100px] sm:max-w-none" title={tenant.email || 'N/A'}>
                           {tenant.email || 'N/A'}
                         </span>
                       </td>
-                      <td className="text-xs">
+                      <td data-label="Unit" className="text-xs">
                         {tenant.units ? (
                           <>
                             <span className="whitespace-nowrap">{tenant.units.unit_number}</span>
@@ -667,15 +667,15 @@ export default function Tenants() {
                           'Unassigned'
                         )}
                       </td>
-                      <td className={`text-xs ${totalBalance > 0 ? 'font-semibold text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                      <td data-label="Balance" className={`text-xs ${totalBalance > 0 ? 'font-semibold text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
                         {formatCurrency(totalBalance)}
                       </td>
-                      <td>
+                      <td data-label="Status">
                         <span className={`badge text-[10px] px-1.5 py-0.5 ${tenant.status === 'active' ? 'badge-success' : 'badge-warning'}`}>
                           {tenant.status}
                         </span>
                       </td>
-                      <td className="text-xs">
+                      <td data-label="Last Modified By" className="text-xs">
                         {tenant.modified_by_name ? (
                           <span className="text-slate-600 dark:text-slate-400" title={`Modified by caretaker: ${tenant.modified_by_name}`}>
                             👤 {tenant.modified_by_name}
@@ -684,7 +684,7 @@ export default function Tenants() {
                           <span className="text-slate-400">Manager</span>
                         )}
                       </td>
-                      <td>
+                      <td data-label="Actions">
                         <div className="flex gap-2 items-center">
                           <button
                             onClick={() => handleEdit(tenant)}
@@ -744,7 +744,7 @@ export default function Tenants() {
           resetForm()
           setError(null)
         }}>
-          <div className="modal-content max-w-md" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content max-w-full sm:max-w-md" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
               <h2 className="text-2xl font-bold text-slate-900 mb-6">
                 {editingTenant ? 'Edit Tenant' : 'Add Tenant'}
@@ -969,7 +969,7 @@ export default function Tenants() {
           setImportResult(null)
           setError(null)
         }}>
-          <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content max-w-full sm:max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
               <h2 className="text-2xl font-bold text-slate-900 mb-6">Import Tenants from Excel</h2>
               
@@ -1073,4 +1073,5 @@ export default function Tenants() {
     </div>
   )
 }
+
 

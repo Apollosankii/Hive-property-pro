@@ -40,7 +40,7 @@ export default function CaretakerLayout({ children }: { children: React.ReactNod
         </div>
       </header>
 
-      <div className="flex">
+      <div className="flex min-h-screen">
         {/* Mobile Sidebar */}
         {sidebarOpen && (
           <div
@@ -107,7 +107,7 @@ export default function CaretakerLayout({ children }: { children: React.ReactNod
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 lg:ml-0 min-h-screen">
+        <main className="flex-1 lg:ml-0 min-h-screen overflow-hidden">
           <div className="p-4 lg:p-6 max-w-7xl mx-auto">
             {children}
           </div>

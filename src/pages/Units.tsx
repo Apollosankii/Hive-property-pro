@@ -217,7 +217,7 @@ export default function Units() {
         </div>
       ) : units && units.length > 0 ? (
         <div className="card overflow-x-auto w-full">
-          <table className="table w-full text-xs sm:text-sm">
+          <table className="table responsive-table w-full text-xs sm:text-sm">
             <thead>
               <tr>
                 <th className="w-[100px] sm:w-[120px]">Unit Number</th>
@@ -231,13 +231,13 @@ export default function Units() {
             <tbody>
               {units.map((unit: any) => (
                 <tr key={unit.id}>
-                  <td className="font-semibold text-slate-900 dark:text-slate-100 text-xs">{unit.unit_number}</td>
-                  <td className="text-slate-700 dark:text-slate-300 text-xs">
+                  <td data-label="Unit Number" className="font-semibold text-slate-900 dark:text-slate-100 text-xs">{unit.unit_number}</td>
+                  <td data-label="Building" className="text-slate-700 dark:text-slate-300 text-xs">
                     <span className="truncate block max-w-[100px] sm:max-w-none" title={unit.buildings?.name || 'N/A'}>
                       {unit.buildings?.name || 'N/A'}
                     </span>
                   </td>
-                  <td>
+                  <td data-label="Status">
                     <span
                       className={`badge text-[10px] px-1.5 py-0.5 ${
                         unit.status === 'occupied'
@@ -248,15 +248,15 @@ export default function Units() {
                       {unit.status}
                     </span>
                   </td>
-                  <td className="text-slate-600 dark:text-slate-400 text-xs">
+                  <td data-label="Tenant" className="text-slate-600 dark:text-slate-400 text-xs">
                     <span className="truncate block max-w-[100px] sm:max-w-none" title={unit.tenants?.name || 'Vacant'}>
                       {unit.tenants?.name || 'Vacant'}
                     </span>
                   </td>
-                  <td className="font-bold text-slate-900 dark:text-slate-100 text-xs">
+                  <td data-label="Monthly Rent" className="font-bold text-slate-900 dark:text-slate-100 text-xs">
                     {formatCurrency(unit.monthly_rent)}
                   </td>
-                  <td>
+                  <td data-label="Actions">
                     <button
                       onClick={() => handleEdit(unit)}
                       className="p-2 text-slate-600 hover:text-primary-600 hover:bg-primary-50 rounded-xl transition-all"
@@ -298,7 +298,7 @@ export default function Units() {
           resetForm()
           setError(null)
         }}>
-          <div className="modal-content max-w-md" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content max-w-full sm:max-w-md" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
               <h2 className="text-2xl font-bold text-slate-900 mb-6">
                 {editingUnit ? 'Edit Unit' : 'Add Unit'}
@@ -417,4 +417,5 @@ export default function Units() {
     </div>
   )
 }
+
 
