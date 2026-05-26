@@ -224,21 +224,37 @@ export default function Payments() {
     return pendingBills.filter((b: any) => b.building_id === selectedBuildingId)
   }, [pendingBills, selectedBuildingId])
 
-  const pendingUnitIds = useMemo(() => {
-    if (!pendingBillsForBuilding?.length) return []
-    return [...new Set(pendingBillsForBuilding.map((b: any) => b.unit_id).filter(Boolean))]
-  }, [pendingBillsForBuilding])
+  const advanceTenantRows = useMemo(() => {
+    const rows = (tenantsList || []).map((tenant: any) => {
+      const unit = unitsList.find((u) => u.id === tenant.unit_id)
+      return {
+        id: tenant.id,
+        name: tenant.name,
+        unit_id: tenant.unit_id,
+        unit_number: unit?.unit_number || null,
+        building_id: unit?.building_id || null,
+        building: unit?.building || null,
+        monthly_rent: unit?.monthly_rent ?? null,
+      }
+    })
+    if (!selectedBuildingId) return rows
+    return rows.filter((row) => row.building_id === selectedBuildingId)
+  }, [tenantsList, unitsList, selectedBuildingId])
+
+  const advanceTenantUnitIds = useMemo(() => {
+    return [...new Set(advanceTenantRows.map((row) => row.unit_id).filter(Boolean))]
+  }, [advanceTenantRows])
 
   const { data: targetBillsByUnitId } = useQuery({
-    queryKey: ['bills-for-month-units', advanceTargetMonth, pendingUnitIds.join(',')],
-    enabled: isModalOpen && paymentMode === 'advance' && !!advanceTargetMonth && pendingUnitIds.length > 0,
+    queryKey: ['bills-for-month-units', advanceTargetMonth, advanceTenantUnitIds.join(',')],
+    enabled: isModalOpen && paymentMode === 'advance' && !!advanceTargetMonth && advanceTenantUnitIds.length > 0,
     queryFn: async () => {
       const monthDate = `${advanceTargetMonth}-01`
       const { data, error } = await supabase
         .from('bills')
         .select('id, unit_id, amount_paid, balance, total_amount, tenant_id, billing_month, status')
         .eq('billing_month', monthDate)
-        .in('unit_id', pendingUnitIds)
+        .in('unit_id', advanceTenantUnitIds)
       if (error) throw error
       const map: Record<string, (typeof data)[0]> = {}
       for (const row of data || []) {
@@ -352,7 +368,7 @@ export default function Payments() {
     queryFn: async () => {
       const { data: unitsData, error } = await supabase
         .from('units')
-        .select('id,unit_number,building_id')
+        .select('id,unit_number,building_id,monthly_rent')
         .order('unit_number', { ascending: false })
       if (error) throw error
 
@@ -627,23 +643,26 @@ export default function Payments() {
     setIsModalOpen(true)
   }
 
-  const toggleBillSelection = (billId: string, bill: any) => {
+  const toggleBillSelection = (rowId: string, row: any) => {
     setSelectedBillIds((prev: string[]) => {
-      const on = prev.includes(billId)
+      const on = prev.includes(rowId)
       if (on) {
-        return prev.filter((id: string) => id !== billId)
+        return prev.filter((id: string) => id !== rowId)
       }
-      let defaultBal = bill.balance
-      if (paymentMode === 'advance' && targetBillsByUnitId?.[bill.unit_id]) {
-        defaultBal = targetBillsByUnitId[bill.unit_id].balance
-      } else if (paymentMode === 'advance' && bill.units?.monthly_rent != null) {
-        defaultBal = bill.units.monthly_rent
+      let defaultBal = row.balance
+      if (paymentMode === 'advance') {
+        const target = row.unit_id ? targetBillsByUnitId?.[row.unit_id] : null
+        if (target) {
+          defaultBal = target.balance
+        } else if (row.monthly_rent != null) {
+          defaultBal = row.monthly_rent
+        }
       }
       setRowAmounts((ra: Record<string, string>) => ({
         ...ra,
-        [billId]: ra[billId] ?? (defaultBal != null ? String(defaultBal) : ''),
+        [rowId]: ra[rowId] ?? (defaultBal != null ? String(defaultBal) : ''),
       }))
-      return [...prev, billId]
+      return [...prev, rowId]
     })
   }
 
@@ -677,50 +696,49 @@ export default function Payments() {
         alert('Choose a target month for the advance payment.')
         return
       }
-      for (const bill of selectedBills) {
-        const sourceKey = billingMonthKey(bill.billing_month)
-        if (!(advanceTargetMonth > sourceKey)) {
-          alert(
-            `Advance month must be after ${sourceKey} for ${bill.units?.unit_number || 'unit'} (${bill.tenants?.name || ''}).`
-          )
-          return
-        }
-      }
     }
 
     const items: Array<ApplyPaymentParams & { unitLabel: string }> = []
     const preErrors: string[] = []
 
-    for (const bill of selectedBills) {
-      const unitLabel = `${bill.units?.unit_number ?? '?'} — ${bill.tenants?.name ?? 'N/A'}`
-      const raw = rowAmounts[bill.id] ?? ''
+    const selectedItems =
+      paymentMode === 'advance'
+        ? advanceTenantRows.filter((row) => selectedBillIds.includes(row.id))
+        : (pendingBillsForBuilding || []).filter((bill: any) => selectedBillIds.includes(bill.id))
+
+    for (const item of selectedItems) {
+      const unitLabel =
+        paymentMode === 'advance'
+          ? `${item.name ?? 'Tenant'} — ${item.unit_number ?? 'No unit'}`
+          : `${item.units?.unit_number ?? '?'} — ${item.tenants?.name ?? 'N/A'}`
+      const rowId = item.id
+      const raw = rowAmounts[rowId] ?? ''
       const amt = parseFloat(raw)
       if (!raw.trim() || Number.isNaN(amt) || amt <= 0) {
         preErrors.push(`${unitLabel}: enter a valid amount.`)
         continue
       }
 
-      let targetBillId = bill.id
-      let tenantId = bill.tenant_id || ''
+      let targetBillId = paymentMode === 'advance' ? '' : item.id
+      let tenantId = paymentMode === 'advance' ? item.id : item.tenant_id || ''
+      let unitId = paymentMode === 'advance' ? item.unit_id : item.unit_id
 
       if (paymentMode === 'advance') {
-        const target = targetBillsByUnitId?.[bill.unit_id]
+        if (!unitId) {
+          preErrors.push(`${unitLabel}: tenant has no assigned unit; cannot record advance payment.`)
+          continue
+        }
+        const target = targetBillsByUnitId?.[unitId]
         if (target) {
           targetBillId = target.id
-          tenantId = target.tenant_id || bill.tenant_id || ''
+          tenantId = target.tenant_id || item.id
         } else {
           try {
             targetBillId = await ensureAdvanceRentBill({
-              unitId: bill.unit_id,
-              tenantId: bill.tenant_id,
+              unitId,
+              tenantId: item.id,
               targetMonthYyyyMm: advanceTargetMonth,
             })
-            const { data: stubBill } = await supabase
-              .from('bills')
-              .select('tenant_id')
-              .eq('id', targetBillId)
-              .single()
-            tenantId = stubBill?.tenant_id || bill.tenant_id || ''
           } catch (err) {
             preErrors.push(
               `${unitLabel}: ${err instanceof Error ? err.message : 'Could not create advance rent bill.'}`
@@ -731,7 +749,7 @@ export default function Payments() {
       }
 
       if (!tenantId) {
-        preErrors.push(`${unitLabel}: missing tenant on bill; cannot record payment.`)
+        preErrors.push(`${unitLabel}: missing tenant; cannot record payment.`)
         continue
       }
 
@@ -743,7 +761,7 @@ export default function Payments() {
 
       items.push({
         targetBillId,
-        unitId: bill.unit_id,
+        unitId,
         tenantId,
         amount: amt,
         paymentMethod,
@@ -1085,87 +1103,123 @@ export default function Payments() {
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Pending bills ({selectedMonth}
-                    {selectedBuildingId
+                    {paymentMode === 'advance' ? 'All tenants' : `Pending bills (${selectedMonth}`}
+                    {paymentMode !== 'advance' && selectedBuildingId
                       ? ` · ${buildingsList.find((x: any) => x.id === selectedBuildingId)?.name ?? 'this building'}`
                       : ''}
-                    )
+                    {paymentMode !== 'advance' ? ')' : ''}
                   </label>
                   <div className="border border-slate-200 rounded-xl max-h-56 overflow-y-auto divide-y divide-slate-100">
-                    {pendingBillsError && <div className="p-3 text-sm text-red-600">Error loading bills</div>}
-                    {pendingBillsLoading && !pendingBillsError && (
+                    {pendingBillsError && paymentMode !== 'advance' && <div className="p-3 text-sm text-red-600">Error loading bills</div>}
+                    {pendingBillsLoading && paymentMode !== 'advance' && !pendingBillsError && (
                       <div className="p-3 text-sm text-slate-500">Loading bills...</div>
                     )}
-                    {!pendingBillsLoading &&
-                      !pendingBillsError &&
-                      (!pendingBills || pendingBills.length === 0) && (
-                        <div className="p-3 text-sm text-slate-500">No pending bills for this month.</div>
-                      )}
-                    {!pendingBillsLoading &&
-                      !pendingBillsError &&
-                      pendingBills &&
-                      pendingBills.length > 0 &&
-                      pendingBillsForBuilding.length === 0 && (
-                        <div className="p-3 text-sm text-slate-500">
-                          No pending bills for the selected building this month. Choose another building or clear the
-                          building filter.
-                        </div>
-                      )}
-                    {!pendingBillsLoading &&
-                      !pendingBillsError &&
-                      pendingBillsForBuilding?.map((bill: any) => {
-                        const checked = selectedBillIds.includes(bill.id)
-                        const target =
-                          paymentMode === 'advance' && bill.unit_id ? targetBillsByUnitId?.[bill.unit_id] : null
-                        return (
-                          <label
-                            key={bill.id}
-                            className={`flex items-start gap-3 p-3 cursor-pointer hover:bg-slate-50 ${checked ? 'bg-slate-50/80' : ''}`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleBillSelection(bill.id, bill)}
-                              className="mt-1 rounded border-slate-300"
-                            />
-                            <div className="flex-1 min-w-0 text-sm">
-                              <div className="font-medium text-slate-900">
-                                {bill.units?.unit_number} — {bill.tenants?.name}
-                              </div>
-                              <div className="text-slate-600 text-xs mt-0.5">
-                                This bill {formatCurrency(bill.balance)} due · Month {billingMonthKey(bill.billing_month)}
-                                {paymentMode === 'advance' && (
-                                  <>
-                                    {' '}
-                                    → target:{' '}
-                                    {target ? (
-                                      <span className="text-slate-800">{formatCurrency(target.balance)} bal</span>
-                                    ) : advanceTargetMonth ? (
-                                      <span className="text-emerald-800">creates rent-only bill</span>
-                                    ) : (
-                                      <span className="text-slate-400">—</span>
-                                    )}
-                                  </>
+                    {paymentMode !== 'advance' && !pendingBillsLoading && !pendingBillsError && (!pendingBills || pendingBills.length === 0) && (
+                      <div className="p-3 text-sm text-slate-500">No pending bills for this month.</div>
+                    )}
+                    {paymentMode !== 'advance' && !pendingBillsLoading && !pendingBillsError && pendingBills && pendingBills.length > 0 && pendingBillsForBuilding.length === 0 && (
+                      <div className="p-3 text-sm text-slate-500">
+                        No pending bills for the selected building this month. Choose another building or clear the
+                        building filter.
+                      </div>
+                    )}
+                    {paymentMode === 'advance' && advanceTenantRows.length === 0 && (
+                      <div className="p-3 text-sm text-slate-500">No tenants found for the selected building.</div>
+                    )}
+                    {paymentMode === 'advance'
+                      ? advanceTenantRows.map((tenantRow: any) => {
+                          const checked = selectedBillIds.includes(tenantRow.id)
+                          const target = tenantRow.unit_id ? targetBillsByUnitId?.[tenantRow.unit_id] : null
+                          const disabled = !tenantRow.unit_id
+                          return (
+                            <label
+                              key={tenantRow.id}
+                              className={`flex items-start gap-3 p-3 cursor-pointer hover:bg-slate-50 ${checked ? 'bg-slate-50/80' : ''} ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                disabled={disabled}
+                                onChange={() => toggleBillSelection(tenantRow.id, tenantRow)}
+                                className="mt-1 rounded border-slate-300"
+                              />
+                              <div className="flex-1 min-w-0 text-sm">
+                                <div className="font-medium text-slate-900">
+                                  {tenantRow.name} — {tenantRow.unit_number ?? 'No unit'}
+                                </div>
+                                <div className="text-slate-600 text-xs mt-0.5">
+                                  {tenantRow.building ? `${tenantRow.building}` : 'Unassigned unit'} ·{' '}
+                                  {tenantRow.monthly_rent != null ? formatCurrency(tenantRow.monthly_rent) : 'No rent data'}
+                                  {paymentMode === 'advance' && (
+                                    <>
+                                      {' '}
+                                      → target:{' '}
+                                      {target ? (
+                                        <span className="text-slate-800">{formatCurrency(target.balance)} bal</span>
+                                      ) : advanceTargetMonth ? (
+                                        <span className="text-emerald-800">creates rent-only bill</span>
+                                      ) : (
+                                        <span className="text-slate-400">—</span>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                                {checked && (
+                                  <div className="mt-2 flex items-center gap-2">
+                                    <span className="text-xs text-slate-500 whitespace-nowrap">Amount (KES)</span>
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      value={rowAmounts[tenantRow.id] ?? ''}
+                                      onChange={(e) => updateRowAmount(tenantRow.id, e.target.value)}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="input flex-1 min-w-0 py-1.5 text-sm"
+                                      placeholder="0.00"
+                                    />
+                                  </div>
                                 )}
                               </div>
-                              {checked && (
-                                <div className="mt-2 flex items-center gap-2">
-                                  <span className="text-xs text-slate-500 whitespace-nowrap">Amount (KES)</span>
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    value={rowAmounts[bill.id] ?? ''}
-                                    onChange={(e) => updateRowAmount(bill.id, e.target.value)}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="input flex-1 min-w-0 py-1.5 text-sm"
-                                    placeholder="0.00"
-                                  />
+                            </label>
+                          )
+                        })
+                      : pendingBillsForBuilding?.map((bill: any) => {
+                          const checked = selectedBillIds.includes(bill.id)
+                          return (
+                            <label
+                              key={bill.id}
+                              className={`flex items-start gap-3 p-3 cursor-pointer hover:bg-slate-50 ${checked ? 'bg-slate-50/80' : ''}`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleBillSelection(bill.id, bill)}
+                                className="mt-1 rounded border-slate-300"
+                              />
+                              <div className="flex-1 min-w-0 text-sm">
+                                <div className="font-medium text-slate-900">
+                                  {bill.units?.unit_number} — {bill.tenants?.name}
                                 </div>
-                              )}
-                            </div>
-                          </label>
-                        )
-                      })}
+                                <div className="text-slate-600 text-xs mt-0.5">
+                                  This bill {formatCurrency(bill.balance)} due · Month {billingMonthKey(bill.billing_month)}
+                                </div>
+                                {checked && (
+                                  <div className="mt-2 flex items-center gap-2">
+                                    <span className="text-xs text-slate-500 whitespace-nowrap">Amount (KES)</span>
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      value={rowAmounts[bill.id] ?? ''}
+                                      onChange={(e) => updateRowAmount(bill.id, e.target.value)}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="input flex-1 min-w-0 py-1.5 text-sm"
+                                      placeholder="0.00"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            </label>
+                          )
+                        })}
                   </div>
                   <div className="flex flex-wrap items-end gap-2 mt-2">
                     <div className="flex-1 min-w-[140px]">
