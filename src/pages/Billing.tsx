@@ -409,6 +409,48 @@ export default function Billing() {
     refetchOnWindowFocus: true,
   })
 
+  const fetchAdvanceCreditsForMonth = async (monthStr: string) => {
+    const { data, error } = await supabase
+      .from('advance_payments')
+      .select('id, unit_id, amount')
+      .eq('target_month', monthStr)
+      .is('applied_bill_id', null)
+
+    if (error) {
+      console.error('Failed to fetch advance payments for month', monthStr, error)
+      throw error
+    }
+
+    const credits = new Map<string, { total: number; ids: string[] }>()
+    for (const row of data || []) {
+      const id = row.id
+      const unitId = row.unit_id
+      const amount = Number(row.amount || 0)
+      const existing = credits.get(unitId) || { total: 0, ids: [] }
+      existing.total += amount
+      existing.ids.push(id)
+      credits.set(unitId, existing)
+    }
+
+    return credits
+  }
+
+  const fetchAdvanceCreditForMonthAndUnit = async (monthStr: string, unitId: string) => {
+    const { data, error } = await supabase
+      .from('advance_payments')
+      .select('amount')
+      .eq('target_month', monthStr)
+      .eq('unit_id', unitId)
+      .is('applied_bill_id', null)
+
+    if (error) {
+      console.error('Failed to fetch advance credits for unit', unitId, monthStr, error)
+      throw error
+    }
+
+    return (data || []).reduce((sum: number, row: any) => sum + Number(row.amount || 0), 0)
+  }
+
   const generateBillsMutation = useMutation({
     mutationFn: async () => {
       if (!occupiedUnits) return
@@ -448,6 +490,12 @@ export default function Billing() {
           return [b.unit_id, arrears]
         }) || []
       )
+
+      const monthStr = selectedMonth + '-01'
+      const advanceCredits = await fetchAdvanceCreditsForMonth(monthStr)
+      if (advanceCredits.size > 0) {
+        console.log('Advance credits found for target month:', advanceCredits)
+      }
 
       const totalArrears = Array.from(prevBalances.values()).reduce((sum, val) => sum + val, 0)
       if (totalArrears > 0) {
@@ -514,7 +562,6 @@ export default function Billing() {
         console.log('Bulk generation - Final amounts:', { garbageAmount, maintenanceAmount, otherUtilitiesAmount })
       }
 
-      const monthStr = selectedMonth + '-01'
       const unitIds = occupiedUnits.map((u: any) => u.id)
 
       const { data: existingMonthBills, error: existingErr } = await supabase
@@ -527,7 +574,8 @@ export default function Billing() {
       const existingByUnit = new Map((existingMonthBills || []).map((row) => [row.unit_id, row]))
 
       const toInsert: any[] = []
-      const toUpdate: { id: string; patch: Record<string, unknown> }[] = []
+      const toUpdate: { id: string; unitId: string; patch: Record<string, unknown> }[] = []
+      const billIdByUnitId = new Map<string, string>()
 
       for (const unit of occupiedUnits) {
         const readings = meterReadings[unit.id] || {
@@ -538,6 +586,11 @@ export default function Billing() {
         }
 
         const arrears = prevBalances.get(unit.id) || 0
+        const advanceCredit = advanceCredits.get(unit.id)?.total || 0
+
+        if (advanceCredit !== 0) {
+          console.log(`Unit ${unit.id}: Applying advance credit of ${advanceCredit} to ${monthStr}`)
+        }
 
         const patch = {
           tenant_id: unit.tenants?.id || null,
@@ -549,7 +602,7 @@ export default function Billing() {
           elec_current_reading: readings.elec_current,
           elec_rate: defaultElecRate,
           rent_amount: unit.monthly_rent || 0,
-          arrears_brought_forward: arrears,
+          arrears_brought_forward: arrears - advanceCredit,
           garbage_amount: garbageAmount,
           maintenance_amount: maintenanceAmount,
           other_utilities_amount: otherUtilitiesAmount,
@@ -557,7 +610,7 @@ export default function Billing() {
 
         const ex = existingByUnit.get(unit.id)
         if (ex) {
-          toUpdate.push({ id: ex.id, patch })
+          toUpdate.push({ id: ex.id, unitId: unit.id, patch })
         } else {
           toInsert.push({
             ...patch,
@@ -574,6 +627,7 @@ export default function Billing() {
         const { error: upErr } = await supabase.from('bills').update(u.patch).eq('id', u.id)
         if (upErr) throw upErr
         processedBillIds.push(u.id)
+        billIdByUnitId.set(u.unitId, u.id)
       }
 
       let insertedBills: any[] = []
@@ -581,7 +635,26 @@ export default function Billing() {
         const { data: ins, error: billsError } = await supabase.from('bills').insert(toInsert).select()
         if (billsError) throw billsError
         insertedBills = ins || []
-        processedBillIds.push(...insertedBills.map((b) => b.id))
+        insertedBills.forEach((b: any) => {
+          processedBillIds.push(b.id)
+          billIdByUnitId.set(b.unit_id, b.id)
+        })
+      }
+
+      if (advanceCredits.size > 0) {
+        for (const [unitId, advanceCredit] of advanceCredits.entries()) {
+          const billId = billIdByUnitId.get(unitId)
+          if (!billId || advanceCredit.ids.length === 0) continue
+
+          const { error: applyErr } = await supabase
+            .from('advance_payments')
+            .update({ applied_bill_id: billId, applied_at: new Date().toISOString() })
+            .in('id', advanceCredit.ids)
+
+          if (applyErr) {
+            console.warn('Failed to mark advance payments applied for unit', unitId, applyErr)
+          }
+        }
       }
 
       if (processedBillIds.length > 0) {
@@ -1131,6 +1204,8 @@ export default function Billing() {
       .single()
 
     const prevBalance = prevBill ? (prevBill.total_amount - prevBill.amount_paid) : 0
+    const advanceCredit = await fetchAdvanceCreditForMonthAndUnit(selectedMonth + '-01', selectedUnitForBill)
+    const arrears = prevBalance - advanceCredit
 
     const billData = {
       unit_id: selectedUnitForBill,
@@ -1144,7 +1219,7 @@ export default function Billing() {
       elec_rate: 15,
       rent_amount: 0,
       // Allow negative prevBalance (overpayments) to be carried forward as negative arrears
-      arrears_brought_forward: prevBalance,
+      arrears_brought_forward: arrears,
       garbage_amount: garbageAmount,
       maintenance_amount: maintenanceAmount,
       other_utilities_amount: otherUtilitiesAmount,
@@ -2275,10 +2350,11 @@ export default function Billing() {
                           .eq('billing_month', prevMonthStr)
                           .single()
 
+                        const advanceCredit = await fetchAdvanceCreditForMonthAndUnit(selectedMonth + '-01', unit.id)
+                        const computedArrears = (prevBill && typeof prevBill.balance !== 'undefined' && prevBill.balance !== null ? prevBill.balance : 0) - advanceCredit
+
                         // Preserve negative balances (overpayment) as negative arrears when present
-                        newFormData.arrears_brought_forward = prevBill && typeof prevBill.balance !== 'undefined' && prevBill.balance !== null
-                          ? prevBill.balance.toString()
-                          : '0'
+                        newFormData.arrears_brought_forward = computedArrears.toString()
 
                         // Auto-fill utility amounts from active utility types ONLY
                         // Reset utility amounts first

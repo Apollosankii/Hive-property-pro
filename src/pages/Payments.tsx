@@ -5,7 +5,6 @@ import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Plus, Download, DollarSign, CheckCircle } from 'lucide-react'
 import { generateReceiptPDF } from '@/lib/pdf'
-import { ensureAdvanceRentBill } from '@/lib/bills'
 import { fetchBuildingPaymentByUnitId, readGlobalPaymentSettings, resolvePaymentInstructions, buildingHasPaymentOverride } from '@/lib/payment-instructions'
 
 function billingMonthKey(billingMonth: string): string {
@@ -97,6 +96,37 @@ async function applyPaymentToBill(params: ApplyPaymentParams) {
   }
 
   return payment
+}
+
+async function recordAdvancePayment(params: {
+  unitId: string
+  tenantId: string
+  amount: number
+  paymentMethod: 'cash' | 'mpesa' | 'bank'
+  receiptUrl?: string
+  notes?: string
+  paymentDate?: string
+  targetMonth: string
+}) {
+  const { data: advancePayment, error } = await supabase
+    .from('advance_payments')
+    .insert([
+      {
+        unit_id: params.unitId,
+        tenant_id: params.tenantId,
+        target_month: params.targetMonth,
+        amount: params.amount,
+        payment_method: params.paymentMethod,
+        receipt_url: params.receiptUrl,
+        payment_date: params.paymentDate ?? new Date().toISOString(),
+        notes: params.notes,
+      },
+    ])
+    .select()
+    .single()
+
+  if (error) throw error
+  return advancePayment
 }
 
 export default function Payments() {
@@ -240,29 +270,6 @@ export default function Payments() {
     if (!selectedBuildingId) return rows
     return rows.filter((row) => row.building_id === selectedBuildingId)
   }, [tenantsList, unitsList, selectedBuildingId])
-
-  const advanceTenantUnitIds = useMemo(() => {
-    return [...new Set(advanceTenantRows.map((row) => row.unit_id).filter(Boolean))]
-  }, [advanceTenantRows])
-
-  const { data: targetBillsByUnitId } = useQuery({
-    queryKey: ['bills-for-month-units', advanceTargetMonth, advanceTenantUnitIds.join(',')],
-    enabled: isModalOpen && paymentMode === 'advance' && !!advanceTargetMonth && advanceTenantUnitIds.length > 0,
-    queryFn: async () => {
-      const monthDate = `${advanceTargetMonth}-01`
-      const { data, error } = await supabase
-        .from('bills')
-        .select('id, unit_id, amount_paid, balance, total_amount, tenant_id, billing_month, status')
-        .eq('billing_month', monthDate)
-        .in('unit_id', advanceTenantUnitIds)
-      if (error) throw error
-      const map: Record<string, (typeof data)[0]> = {}
-      for (const row of data || []) {
-        map[row.unit_id] = row
-      }
-      return map
-    },
-  })
 
   const { data: payments, error: paymentsError, isLoading: paymentsLoading } = useQuery({
     queryKey: ['payments', selectedMonth],
@@ -556,6 +563,8 @@ export default function Payments() {
       items: Array<
         ApplyPaymentParams & {
           unitLabel: string
+          isAdvance?: boolean
+          targetMonth?: string
         }
       >
     ): Promise<BulkMutationResult> => {
@@ -563,9 +572,20 @@ export default function Payments() {
       const errors: { unitLabel: string; message: string }[] = []
 
       for (const item of items) {
-        const { unitLabel, ...applyParams } = item
+        const { unitLabel, isAdvance, targetMonth, ...applyParams } = item
         try {
-          const p = await applyPaymentToBill(applyParams)
+          const p = isAdvance
+            ? await recordAdvancePayment({
+                unitId: applyParams.unitId,
+                tenantId: applyParams.tenantId,
+                amount: applyParams.amount,
+                paymentMethod: applyParams.paymentMethod,
+                receiptUrl: applyParams.receiptUrl,
+                paymentDate: applyParams.paymentDate,
+                notes: applyParams.notes,
+                targetMonth: targetMonth || '',
+              })
+            : await applyPaymentToBill(applyParams)
           results.push(p)
         } catch (e: unknown) {
           const message = e instanceof Error ? e.message : 'Unknown error'
@@ -649,15 +669,7 @@ export default function Payments() {
       if (on) {
         return prev.filter((id: string) => id !== rowId)
       }
-      let defaultBal = row.balance
-      if (paymentMode === 'advance') {
-        const target = row.unit_id ? targetBillsByUnitId?.[row.unit_id] : null
-        if (target) {
-          defaultBal = target.balance
-        } else if (row.monthly_rent != null) {
-          defaultBal = row.monthly_rent
-        }
-      }
+      const defaultBal = row.balance != null ? row.balance : row.monthly_rent
       setRowAmounts((ra: Record<string, string>) => ({
         ...ra,
         [rowId]: ra[rowId] ?? (defaultBal != null ? String(defaultBal) : ''),
@@ -685,26 +697,23 @@ export default function Payments() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
 
-    const selectedBills = (pendingBillsForBuilding || []).filter((b: any) => selectedBillIds.includes(b.id))
-    if (selectedBills.length === 0) {
-      alert('Select at least one bill.')
+    if (paymentMode === 'advance' && !advanceTargetMonth) {
+      alert('Choose a target month for the advance payment.')
       return
     }
-
-    if (paymentMode === 'advance') {
-      if (!advanceTargetMonth) {
-        alert('Choose a target month for the advance payment.')
-        return
-      }
-    }
-
-    const items: Array<ApplyPaymentParams & { unitLabel: string }> = []
-    const preErrors: string[] = []
 
     const selectedItems =
       paymentMode === 'advance'
         ? advanceTenantRows.filter((row) => selectedBillIds.includes(row.id))
         : (pendingBillsForBuilding || []).filter((bill: any) => selectedBillIds.includes(bill.id))
+
+    if (selectedItems.length === 0) {
+      alert(paymentMode === 'advance' ? 'Select at least one tenant.' : 'Select at least one bill.')
+      return
+    }
+
+    const items: Array<ApplyPaymentParams & { unitLabel: string; isAdvance?: boolean; targetMonth?: string }> = []
+    const preErrors: string[] = []
 
     for (const item of selectedItems) {
       const unitLabel =
@@ -721,30 +730,12 @@ export default function Payments() {
 
       let targetBillId = paymentMode === 'advance' ? '' : item.id
       let tenantId = paymentMode === 'advance' ? item.id : item.tenant_id || ''
-      let unitId = paymentMode === 'advance' ? item.unit_id : item.unit_id
+      let unitId = item.unit_id
 
       if (paymentMode === 'advance') {
         if (!unitId) {
           preErrors.push(`${unitLabel}: tenant has no assigned unit; cannot record advance payment.`)
           continue
-        }
-        const target = targetBillsByUnitId?.[unitId]
-        if (target) {
-          targetBillId = target.id
-          tenantId = target.tenant_id || item.id
-        } else {
-          try {
-            targetBillId = await ensureAdvanceRentBill({
-              unitId,
-              tenantId: item.id,
-              targetMonthYyyyMm: advanceTargetMonth,
-            })
-          } catch (err) {
-            preErrors.push(
-              `${unitLabel}: ${err instanceof Error ? err.message : 'Could not create advance rent bill.'}`
-            )
-            continue
-          }
         }
       }
 
@@ -756,7 +747,7 @@ export default function Payments() {
       const baseNotes = notes.trim()
       const combinedNotes =
         paymentMode === 'advance'
-          ? [baseNotes, `Advance payment for ${advanceTargetMonth}`].filter(Boolean).join(' — ')
+          ? [baseNotes, `Advance credit for ${advanceTargetMonth}`].filter(Boolean).join(' — ')
           : baseNotes || undefined
 
       items.push({
@@ -767,6 +758,8 @@ export default function Payments() {
         paymentMethod,
         notes: combinedNotes,
         unitLabel,
+        isAdvance: paymentMode === 'advance',
+        targetMonth: paymentMode === 'advance' ? `${advanceTargetMonth}-01` : undefined,
       })
     }
 
@@ -1129,7 +1122,6 @@ export default function Payments() {
                     {paymentMode === 'advance'
                       ? advanceTenantRows.map((tenantRow: any) => {
                           const checked = selectedBillIds.includes(tenantRow.id)
-                          const target = tenantRow.unit_id ? targetBillsByUnitId?.[tenantRow.unit_id] : null
                           const disabled = !tenantRow.unit_id
                           return (
                             <label
@@ -1150,18 +1142,8 @@ export default function Payments() {
                                 <div className="text-slate-600 text-xs mt-0.5">
                                   {tenantRow.building ? `${tenantRow.building}` : 'Unassigned unit'} ·{' '}
                                   {tenantRow.monthly_rent != null ? formatCurrency(tenantRow.monthly_rent) : 'No rent data'}
-                                  {paymentMode === 'advance' && (
-                                    <>
-                                      {' '}
-                                      → target:{' '}
-                                      {target ? (
-                                        <span className="text-slate-800">{formatCurrency(target.balance)} bal</span>
-                                      ) : advanceTargetMonth ? (
-                                        <span className="text-emerald-800">creates rent-only bill</span>
-                                      ) : (
-                                        <span className="text-slate-400">—</span>
-                                      )}
-                                    </>
+                                  {paymentMode === 'advance' && advanceTargetMonth && (
+                                    <span className="text-emerald-800"> · credit for {advanceTargetMonth}</span>
                                   )}
                                 </div>
                                 {checked && (

@@ -226,6 +226,21 @@ export interface Payment {
   created_at: string
 }
 
+export interface AdvancePayment {
+  id: string
+  unit_id: string
+  tenant_id: string
+  target_month: string
+  applied_bill_id?: string | null
+  amount: number
+  payment_method: 'cash' | 'mpesa' | 'bank'
+  receipt_url?: string
+  payment_date: string
+  notes?: string
+  applied_at?: string | null
+  created_at: string
+}
+
 export interface SecurityDeposit {
   id: string
   tenant_id: string
