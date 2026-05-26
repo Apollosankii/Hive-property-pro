@@ -137,6 +137,8 @@ export default function Payments() {
   const [filterType, setFilterType] = useState<'unit' | 'tenant'>('unit')
   const [selectedEntityId, setSelectedEntityId] = useState('')
   const [selectedBuildingId, setSelectedBuildingId] = useState('')
+  const [advanceSearch, setAdvanceSearch] = useState('')
+  const [advanceStatusFilter, setAdvanceStatusFilter] = useState<'all' | 'pending' | 'applied'>('all')
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date()
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
@@ -369,6 +371,104 @@ export default function Payments() {
     refetchOnMount: true,
     refetchOnWindowFocus: true,
   })
+
+  const { data: advancePayments, error: advancePaymentsError, isLoading: advancePaymentsLoading } = useQuery({
+    queryKey: ['advance-payments'],
+    queryFn: async () => {
+      const { data: paymentsData, error: paymentsError } = await supabase
+        .from('advance_payments')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(500)
+
+      if (paymentsError) {
+        console.error('Advance payments query error:', paymentsError)
+        throw paymentsError
+      }
+
+      if (!paymentsData || paymentsData.length === 0) {
+        return []
+      }
+
+      const paymentsWithRelations = await Promise.all(
+        paymentsData.map(async (payment: any) => {
+          const [tenantRes, unitRes, billRes] = await Promise.all([
+            payment.tenant_id
+              ? supabase.from('tenants').select('name').eq('id', payment.tenant_id).single()
+              : Promise.resolve({ data: null, error: null }),
+            payment.unit_id
+              ? supabase.from('units').select('unit_number,building_id').eq('id', payment.unit_id).single()
+              : Promise.resolve({ data: null, error: null }),
+            payment.applied_bill_id
+              ? supabase.from('bills').select('billing_month').eq('id', payment.applied_bill_id).single()
+              : Promise.resolve({ data: null, error: null }),
+          ])
+
+          let buildingName = null
+          if (unitRes.data?.building_id) {
+            const { data: buildingData } = await supabase
+              .from('buildings')
+              .select('name')
+              .eq('id', unitRes.data.building_id)
+              .single()
+            buildingName = buildingData?.name || null
+          }
+
+          return {
+            ...payment,
+            tenant_name: tenantRes.data?.name || 'Unknown tenant',
+            unit_number: unitRes.data?.unit_number || 'Unknown unit',
+            building_id: unitRes.data?.building_id ?? null,
+            building_name: buildingName,
+            applied_bill: billRes.data ? { billing_month: billRes.data.billing_month } : null,
+          }
+        })
+      )
+
+      return paymentsWithRelations
+    },
+    staleTime: 1000 * 60 * 5,
+  })
+
+  const filteredAdvancePayments = useMemo(() => {
+    if (!advancePayments?.length) return []
+
+    return advancePayments.filter((payment: any) => {
+      if (selectedBuildingId) {
+        if (payment.building_id !== selectedBuildingId) {
+          return false
+        }
+      }
+
+      if (advanceStatusFilter !== 'all') {
+        const isApplied = Boolean(payment.applied_at)
+        if (advanceStatusFilter === 'applied' && !isApplied) return false
+        if (advanceStatusFilter === 'pending' && isApplied) return false
+      }
+
+      if (!advanceSearch) return true
+      const searchLower = advanceSearch.toLowerCase()
+      return [
+        payment.tenant_name,
+        payment.unit_number,
+        payment.building_name,
+        payment.notes,
+        payment.payment_method,
+      ]
+        .filter(Boolean)
+        .some((value: string) => value.toLowerCase().includes(searchLower))
+    })
+  }, [advancePayments, selectedBuildingId, advanceStatusFilter, advanceSearch])
+
+  const advancePaymentsSummary = useMemo(() => {
+    const total = (filteredAdvancePayments || []).reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0)
+    return {
+      count: filteredAdvancePayments?.length || 0,
+      total,
+      applied: filteredAdvancePayments?.filter((payment: any) => Boolean(payment.applied_at)).length || 0,
+      pending: filteredAdvancePayments?.filter((payment: any) => !payment.applied_at).length || 0,
+    }
+  }, [filteredAdvancePayments])
 
   useQuery({
     queryKey: ['units-list'],
@@ -1042,6 +1142,117 @@ export default function Payments() {
                     <DollarSign className="text-slate-400" size={24} />
                   </div>
                   <p className="text-slate-500 font-medium">No payments found</p>
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="card overflow-x-auto w-full">
+        <div className="p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-900">Advance Credits</h2>
+            <p className="text-sm text-slate-500">Track advance payment credits for tenants and see when they are applied to future bills.</p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <input
+              type="search"
+              value={advanceSearch}
+              onChange={(e) => setAdvanceSearch(e.target.value)}
+              placeholder="Search advance credits..."
+              className="input w-full sm:w-64"
+            />
+            <select
+              value={advanceStatusFilter}
+              onChange={(e) => setAdvanceStatusFilter(e.target.value as 'all' | 'pending' | 'applied')}
+              className="input w-full sm:w-48"
+            >
+              <option value="all">All statuses</option>
+              <option value="pending">Pending</option>
+              <option value="applied">Applied</option>
+            </select>
+          </div>
+        </div>
+        <div className="p-3 grid grid-cols-3 gap-3">
+          <div className="p-3 bg-slate-50 rounded-xl">
+            <div className="text-sm text-slate-600">Advance credits</div>
+            <div className="font-bold text-slate-900">{advancePaymentsSummary.count}</div>
+          </div>
+          <div className="p-3 bg-slate-50 rounded-xl">
+            <div className="text-sm text-slate-600">Total amount</div>
+            <div className="font-bold text-slate-900">{formatCurrency(advancePaymentsSummary.total)}</div>
+          </div>
+          <div className="p-3 bg-slate-50 rounded-xl">
+            <div className="text-sm text-slate-600">Pending / Applied</div>
+            <div className="font-bold text-slate-900">
+              {advancePaymentsSummary.pending} / {advancePaymentsSummary.applied}
+            </div>
+          </div>
+        </div>
+        <table className="table w-full text-xs sm:text-sm">
+          <thead>
+            <tr>
+              <th className="w-[90px] sm:w-[110px]">Date</th>
+              <th className="w-[120px] sm:w-[140px]">Tenant</th>
+              <th className="w-[70px] sm:w-[90px]">Unit</th>
+              <th className="w-[120px] sm:w-[140px]">Building</th>
+              <th className="w-[90px] sm:w-[110px]">Amount</th>
+              <th className="w-[110px] sm:w-[140px]">Target month</th>
+              <th className="w-[80px] sm:w-[100px]">Status</th>
+              <th className="w-[100px] sm:w-[120px]">Applied bill</th>
+            </tr>
+          </thead>
+          <tbody>
+            {advancePaymentsError && (
+              <tr>
+                <td colSpan={8} className="p-4 text-center">
+                  <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
+                    <p className="text-sm font-semibold text-red-900 mb-1">Error loading advance credits</p>
+                    <p className="text-sm text-red-700">
+                      {advancePaymentsError.message || 'Failed to load advance payment credits.'}
+                    </p>
+                  </div>
+                </td>
+              </tr>
+            )}
+            {advancePaymentsLoading ? (
+              <tr>
+                <td colSpan={8} className="p-4 text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
+                  <p className="mt-2 text-slate-600">Loading advance credits...</p>
+                </td>
+              </tr>
+            ) : filteredAdvancePayments && filteredAdvancePayments.length > 0 ? (
+              filteredAdvancePayments.map((payment: any) => (
+                <tr key={payment.id}>
+                  <td>{formatDate(payment.payment_date)}</td>
+                  <td>{payment.tenant_name}</td>
+                  <td>{payment.unit_number}</td>
+                  <td>{payment.building_name || 'N/A'}</td>
+                  <td className="font-semibold text-green-600">{formatCurrency(payment.amount)}</td>
+                  <td>{new Date(payment.target_month).toLocaleDateString('en-GB', { year: 'numeric', month: 'long' })}</td>
+                  <td>
+                    <span className={`badge ${payment.applied_at ? 'badge-success' : 'badge-warning'} capitalize`}>
+                      {payment.applied_at ? 'Applied' : 'Pending'}
+                    </span>
+                  </td>
+                  <td>
+                    {payment.applied_bill ? (
+                      <span className="text-slate-700 text-sm">{billingMonthKey(payment.applied_bill.billing_month)}</span>
+                    ) : (
+                      <span className="text-gray-400">N/A</span>
+                    )}
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={8} className="p-8 text-center">
+                  <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <DollarSign className="text-slate-400" size={24} />
+                  </div>
+                  <p className="text-slate-500 font-medium">No advance payment credits found.</p>
                 </td>
               </tr>
             )}
