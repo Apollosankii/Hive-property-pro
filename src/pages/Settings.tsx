@@ -33,16 +33,20 @@ export default function Settings() {
   })
 
   const { data: utilityTypes, isLoading: utilityTypesLoading } = useQuery({
-    queryKey: ['utility-types'],
+    queryKey: ['utility-types', user?.id],
     queryFn: async () => {
+      if (!user?.id) return []
+
       const { data, error } = await supabase
         .from('utility_types')
         .select('*')
+        .eq('user_id', user.id)
         .order('display_order', { ascending: true })
       
       if (error) throw error
       return data || []
     },
+    enabled: !!user?.id,
     staleTime: 0,
     refetchOnMount: true,
   })
@@ -65,9 +69,11 @@ export default function Settings() {
 
   const createUtilityMutation = useMutation({
     mutationFn: async (utilityData: any) => {
+      if (!user?.id) throw new Error('You must be logged in to create utility types')
+
       const { data, error } = await supabase
         .from('utility_types')
-        .insert([utilityData])
+        .insert([{ ...utilityData, user_id: user.id }])
         .select()
         .single()
       

@@ -65,6 +65,7 @@ export interface Unit {
 
 export interface UtilityType {
   id: string
+  user_id?: string
   name: string
   rate: number
   unit_name: string

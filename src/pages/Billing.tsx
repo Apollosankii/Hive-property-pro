@@ -15,6 +15,7 @@ import {
 } from '@/lib/recurring-utilities'
 import ExportColumnsModal from '@/components/ExportColumnsModal'
 import useToast from '@/hooks/useToast'
+import { useAuthStore } from '@/store/authStore'
 import { Plus, Calendar, CheckCircle, Receipt, Edit, FileText, AlertCircle, X, Printer, FileSpreadsheet, Upload } from 'lucide-react'
 
 export default function Billing() {
@@ -74,6 +75,7 @@ export default function Billing() {
   const [exportBillsToUse, setExportBillsToUse] = useState<any[]>([])
   const queryClient = useQueryClient()
   const toast = useToast()
+  const { user } = useAuthStore()
 
   // Map database/Supabase errors to clear, user-friendly messages
   const friendlyErrorMessage = (err: any, defaultMsg?: string) => {
@@ -394,13 +396,16 @@ export default function Billing() {
     },
   })
 
-  // Fetch active utility types
+  // Fetch active utility types for the logged-in landlord only
   const { data: activeUtilityTypes } = useQuery({
-    queryKey: ['active-utility-types'],
+    queryKey: ['active-utility-types', user?.id],
     queryFn: async () => {
+      if (!user?.id) return []
+
       const { data, error } = await supabase
         .from('utility_types')
         .select('*')
+        .eq('user_id', user.id)
         .eq('is_active', true)
         .order('display_order', { ascending: true })
       
@@ -409,9 +414,9 @@ export default function Billing() {
         throw error
       }
       
-      console.log('✅ Fetched active utility types from database:', data)
       return data || []
     },
+    enabled: !!user?.id,
     staleTime: 0,
     refetchOnMount: true,
     refetchOnWindowFocus: true,
