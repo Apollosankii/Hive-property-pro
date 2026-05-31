@@ -1,6 +1,22 @@
 import jsPDF from 'jspdf'
 import { formatCurrency, formatDate } from './utils'
 import { readGlobalPaymentSettings, resolvePaymentInstructions } from './payment-instructions'
+import { getRecurringLineItems, type UtilityTypeLike } from './recurring-utilities'
+
+function appendRecurringUtilityLines(
+  doc: jsPDF,
+  bill: any,
+  yPos: number,
+  activeUtilityTypes?: UtilityTypeLike[]
+): number {
+  const lines = getRecurringLineItems(bill, activeUtilityTypes)
+  for (const line of lines) {
+    doc.text(line.name, 20, yPos)
+    doc.text(formatCurrency(line.amount), 180, yPos, { align: 'right' })
+    yPos += 7
+  }
+  return yPos
+}
 
 export async function generateReceiptPDF(payment: any) {
   const doc = new jsPDF()
@@ -79,63 +95,7 @@ export async function generateReceiptPDF(payment: any) {
   doc.save(`receipt-${payment.id.slice(0, 8)}.pdf`)
 }
 
-function normalizeUtilityAmount(item: any) {
-  if (!item) return 0
-  if (typeof item.amount === 'number') return item.amount
-  if (typeof item.amount === 'string' && item.amount.trim() !== '') {
-    const parsed = parseFloat(item.amount)
-    if (!Number.isNaN(parsed)) return parsed
-  }
-  const rate = typeof item.rate === 'number' ? item.rate : parseFloat(item.rate || '0') || 0
-  const units = typeof item.units_consumed === 'number' ? item.units_consumed : parseFloat(item.units_consumed || '1') || 0
-  return rate * units
-}
-
-function getNumericValue(value: any) {
-  if (typeof value === 'number') return value
-  if (typeof value === 'string') {
-    const parsed = parseFloat(value)
-    return Number.isNaN(parsed) ? 0 : parsed
-  }
-  return 0
-}
-
-function getRenderedUtilityLineItems(bill: any) {
-  const items = Array.isArray(bill.utility_bill_items) ? bill.utility_bill_items : []
-  const printableItems = items
-    .map((item: any) => ({
-      label: item.utility_types?.name || 'Other Utility',
-      amount: normalizeUtilityAmount(item),
-    }))
-    .filter((item: any) => item.amount > 0)
-
-  const printedLabels = printableItems.map((item: any) => item.label.toLowerCase())
-  const shouldSkip = (label: string) => printedLabels.some((printed: string) => printed.includes(label))
-
-  const output = [...printableItems]
-  const addLegacy = (label: string, amount: number, skipIfLabel: string[]) => {
-    if (amount > 0 && !skipIfLabel.some(shouldSkip)) {
-      output.push({ label, amount })
-    }
-  }
-
-  addLegacy('Garbage', getNumericValue(bill.garbage_amount), ['garbage'])
-  addLegacy('Maintenance', getNumericValue(bill.maintenance_amount), ['maint'])
-  addLegacy('Other Utilities', getNumericValue(bill.other_utilities_amount), ['other', 'utility'])
-
-  return output
-}
-
-function renderUtilityLineItems(doc: any, lineItems: any[], yPos: number) {
-  lineItems.forEach((item: any) => {
-    doc.text(item.label, 20, yPos)
-    doc.text(formatCurrency(item.amount), 180, yPos, { align: 'right' })
-    yPos += 7
-  })
-  return yPos
-}
-
-export async function generateInvoicePDF(bill: any) {
+export async function generateInvoicePDF(bill: any, activeUtilityTypes?: UtilityTypeLike[]) {
   const doc = new jsPDF()
   
   const organizationName =
@@ -185,16 +145,14 @@ export async function generateInvoicePDF(bill: any) {
     doc.text(formatCurrency(bill.elec_amount || 0), 180, yPos, { align: 'right' })
     yPos += 12
   }
-  
-  const utilityLineItems = getRenderedUtilityLineItems(bill)
-  yPos = renderUtilityLineItems(doc, utilityLineItems, yPos)
-  
   if (bill.rent_amount > 0) {
     doc.text('Monthly Rent', 20, yPos)
     doc.text(formatCurrency(bill.rent_amount), 180, yPos, { align: 'right' })
     yPos += 7
   }
-  
+
+  yPos = appendRecurringUtilityLines(doc, bill, yPos, activeUtilityTypes)
+
   if (bill.arrears_brought_forward > 0) {
     doc.text('Arrears Brought Forward', 20, yPos)
     doc.text(formatCurrency(bill.arrears_brought_forward), 180, yPos, { align: 'right' })
@@ -202,11 +160,6 @@ export async function generateInvoicePDF(bill: any) {
   }
   
   // Total
-  const utilityTotal = utilityLineItems.reduce((sum, item) => sum + item.amount, 0)
-  const invoiceTotal = getNumericValue(bill.total_amount) + utilityTotal
-  const amountPaid = getNumericValue(bill.amount_paid)
-  const balanceDue = invoiceTotal - amountPaid
-
   yPos += 5
   doc.setLineWidth(0.5)
   doc.line(20, yPos, 190, yPos)
@@ -215,15 +168,15 @@ export async function generateInvoicePDF(bill: any) {
   doc.setFontSize(12)
   doc.setFont('helvetica', 'bold')
   doc.text('Total Amount:', 20, yPos)
-  doc.text(formatCurrency(invoiceTotal), 180, yPos, { align: 'right' })
+  doc.text(formatCurrency(bill.total_amount), 180, yPos, { align: 'right' })
   yPos += 7
   
   doc.setFont('helvetica', 'normal')
-  doc.text(`Amount Paid: ${formatCurrency(amountPaid)}`, 20, yPos)
+  doc.text(`Amount Paid: ${formatCurrency(bill.amount_paid)}`, 20, yPos)
   yPos += 7
   
   doc.setFont('helvetica', 'bold')
-  doc.text(`Balance Due: ${formatCurrency(balanceDue)}`, 20, yPos)
+  doc.text(`Balance Due: ${formatCurrency(bill.balance)}`, 20, yPos)
   
   const globalInv = readGlobalPaymentSettings()
   const resolvedInv = resolvePaymentInstructions(bill.building_payment ?? null, globalInv)
@@ -264,7 +217,7 @@ export async function generateInvoicePDF(bill: any) {
 }
 
 // Generate bulk invoices - one PDF with multiple pages
-export async function generateBulkInvoicesPDF(bills: any[]) {
+export async function generateBulkInvoicesPDF(bills: any[], activeUtilityTypes?: UtilityTypeLike[]) {
   if (bills.length === 0) return
 
   const doc = new jsPDF()
@@ -331,14 +284,13 @@ export async function generateBulkInvoicesPDF(bills: any[]) {
       yPos += 12
     }
     
-    const utilityLineItems = getRenderedUtilityLineItems(bill)
-    yPos = renderUtilityLineItems(doc, utilityLineItems, yPos)
-
     if (bill.rent_amount > 0) {
       doc.text('Monthly Rent', 20, yPos)
       doc.text(formatCurrency(bill.rent_amount), 180, yPos, { align: 'right' })
       yPos += 7
     }
+
+    yPos = appendRecurringUtilityLines(doc, bill, yPos, activeUtilityTypes)
 
     if (bill.arrears_brought_forward > 0) {
       doc.text('Arrears Brought Forward', 20, yPos)
@@ -347,11 +299,6 @@ export async function generateBulkInvoicesPDF(bills: any[]) {
     }
     
     // Total
-    const utilityTotal = utilityLineItems.reduce((sum, item) => sum + item.amount, 0)
-    const invoiceTotal = getNumericValue(bill.total_amount) + utilityTotal
-    const amountPaid = getNumericValue(bill.amount_paid)
-    const balanceDue = invoiceTotal - amountPaid
-
     yPos += 5
     doc.setLineWidth(0.5)
     doc.line(20, yPos, 190, yPos)
@@ -360,15 +307,15 @@ export async function generateBulkInvoicesPDF(bills: any[]) {
     doc.setFontSize(12)
     doc.setFont('helvetica', 'bold')
     doc.text('Total Amount:', 20, yPos)
-    doc.text(formatCurrency(invoiceTotal), 180, yPos, { align: 'right' })
+    doc.text(formatCurrency(bill.total_amount), 180, yPos, { align: 'right' })
     yPos += 7
     
     doc.setFont('helvetica', 'normal')
-    doc.text(`Amount Paid: ${formatCurrency(amountPaid)}`, 20, yPos)
+    doc.text(`Amount Paid: ${formatCurrency(bill.amount_paid)}`, 20, yPos)
     yPos += 7
     
     doc.setFont('helvetica', 'bold')
-    doc.text(`Balance Due: ${formatCurrency(balanceDue)}`, 20, yPos)
+    doc.text(`Balance Due: ${formatCurrency(bill.balance)}`, 20, yPos)
 
     if (resolved.method || resolved.paybill || resolved.account || resolved.notes) {
       yPos += 10

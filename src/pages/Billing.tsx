@@ -6,6 +6,13 @@ import { generateInvoicePDF, generateBulkInvoicesPDF } from '@/lib/pdf'
 import { exportBillsToExcel } from '@/lib/excel'
 import { importBillsFromFile } from '@/lib/excel-import'
 import { fetchBuildingPaymentByUnitId } from '@/lib/payment-instructions'
+import {
+  buildUtilityBillItemRows,
+  computeUtilityAmounts,
+  fetchUtilityBillItemsForBill,
+  fetchUtilityBillItemsForBills,
+  syncUtilityBillItemsForBill,
+} from '@/lib/recurring-utilities'
 import ExportColumnsModal from '@/components/ExportColumnsModal'
 import useToast from '@/hooks/useToast'
 import { Plus, Calendar, CheckCircle, Receipt, Edit, FileText, AlertCircle, X, Printer, FileSpreadsheet, Upload } from 'lucide-react'
@@ -535,31 +542,16 @@ export default function Billing() {
         defaultElecRate
       })
 
-      // Calculate utility amounts from active utility types ONLY
-      // For fixed-rate utilities, the rate IS the amount (no units calculation needed)
-      let garbageAmount = 0
-      let maintenanceAmount = 0
-      let otherUtilitiesAmount = 0
-      
-      if (activeUtilityTypes && activeUtilityTypes.length > 0) {
-        console.log('Bulk generation - Active utility types:', activeUtilityTypes)
-        activeUtilityTypes.forEach((utility: any) => {
-          const utilityName = utility.name.toLowerCase().trim()
-          const utilityRate = utility.rate || 0
-          
-          console.log(`Processing utility: ${utility.name}, Rate: ${utilityRate}`)
-          
-          // Map utilities to the correct bill columns based on name matching
-          if (utilityName.includes('garbage')) {
-            garbageAmount = utilityRate
-          } else if (utilityName.includes('maintenance')) {
-            maintenanceAmount = utilityRate
-          } else {
-            // All other active utilities
-            otherUtilitiesAmount += utilityRate
-          }
-        })
-        
+      // Fixed recurring utilities only — water/electricity use meter readings, not utility types
+      const {
+        garbageAmount,
+        maintenanceAmount,
+        otherUtilitiesAmount,
+        recurringUtilities,
+      } = computeUtilityAmounts(activeUtilityTypes || [])
+
+      if (recurringUtilities.length > 0) {
+        console.log('Bulk generation - Recurring utilities:', recurringUtilities)
         console.log('Bulk generation - Final amounts:', { garbageAmount, maintenanceAmount, otherUtilitiesAmount })
       }
 
@@ -662,18 +654,10 @@ export default function Billing() {
         await supabase.from('utility_bill_items').delete().in('bill_id', processedBillIds)
       }
 
-      if (processedBillIds.length > 0 && activeUtilityTypes && activeUtilityTypes.length > 0) {
-        const utilityBillItems: any[] = []
-        for (const billId of processedBillIds) {
-          for (const utility of activeUtilityTypes) {
-            utilityBillItems.push({
-              bill_id: billId,
-              utility_type_id: utility.id,
-              units_consumed: 1,
-              rate: utility.rate,
-            })
-          }
-        }
+      if (processedBillIds.length > 0 && recurringUtilities.length > 0) {
+        const utilityBillItems = processedBillIds.flatMap((billId) =>
+          buildUtilityBillItemRows(billId, recurringUtilities)
+        )
         if (utilityBillItems.length > 0) {
           const { error: utilityItemsError } = await supabase.from('utility_bill_items').insert(utilityBillItems)
           if (utilityItemsError) {
@@ -855,7 +839,12 @@ export default function Billing() {
         .single()
       
       if (error) throw error
-      if (data?.id) await syncBillStatus(data.id)
+      if (data?.id) {
+        if (activeUtilityTypes && activeUtilityTypes.length > 0) {
+          await syncUtilityBillItemsForBill(data.id, activeUtilityTypes)
+        }
+        await syncBillStatus(data.id)
+      }
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['bills'] })
@@ -941,36 +930,10 @@ export default function Billing() {
   const handleCreateBill = () => {
     setSelectedUnitForBill('')
     
-    // Auto-fill utility amounts from active utility types when modal opens
-    let garbageAmount = '0'
-    let maintenanceAmount = '0'
-    let otherUtilitiesAmount = '0'
-    
-    if (activeUtilityTypes && activeUtilityTypes.length > 0) {
-      console.log('🔍 handleCreateBill - Active utility types found:', activeUtilityTypes)
-      activeUtilityTypes.forEach((utility: any) => {
-        const utilityName = utility.name.toLowerCase().trim()
-        const utilityRate = parseFloat(utility.rate) || 0
-        
-        console.log(`  📋 Checking utility: "${utility.name}" -> normalized: "${utilityName}", rate: ${utilityRate}, is_active: ${utility.is_active}`)
-        
-        if (utilityName.includes('garbage')) {
-          garbageAmount = utilityRate.toString()
-          console.log(`    ✅ Setting garbage_amount to ${garbageAmount}`)
-        } else if (utilityName.includes('maintenance')) {
-          maintenanceAmount = utilityRate.toString()
-          console.log(`    ✅ Setting maintenance_amount to ${maintenanceAmount}`)
-        } else {
-          const currentOther = parseFloat(otherUtilitiesAmount || '0')
-          otherUtilitiesAmount = (currentOther + utilityRate).toString()
-          console.log(`    ✅ Adding to other_utilities_amount: ${otherUtilitiesAmount}`)
-        }
-      })
-    } else {
-      console.log('⚠️ handleCreateBill - No active utility types found')
-    }
-    
-    console.log('💰 handleCreateBill - Final amounts:', { garbageAmount, maintenanceAmount, otherUtilitiesAmount })
+    // Auto-fill utility amounts from active recurring utility types when modal opens
+    const { garbageAmount, maintenanceAmount, otherUtilitiesAmount } = computeUtilityAmounts(
+      activeUtilityTypes || []
+    )
     
     // Get settings to initialize rate fields
     const storedSettings = localStorage.getItem('app-settings')
@@ -985,9 +948,9 @@ export default function Billing() {
       elec_rate: parsedSettings?.elec_rate?.toString() || '',
       rent_amount: '',
       arrears_brought_forward: '',
-      garbage_amount: garbageAmount,
-      maintenance_amount: maintenanceAmount,
-      other_utilities_amount: otherUtilitiesAmount,
+      garbage_amount: garbageAmount.toString(),
+      maintenance_amount: maintenanceAmount.toString(),
+      other_utilities_amount: otherUtilitiesAmount.toString(),
       amount_paid: '0',
     })
     setShowCreateBillModal(true)
@@ -1062,22 +1025,12 @@ export default function Billing() {
     let maintenanceAmount = parseFloat(billFormData.maintenance_amount) || 0
     let otherUtilitiesAmount = parseFloat(billFormData.other_utilities_amount) || 0
     
-    // If form values are 0, check active utility types (fallback)
+    // If form values are 0, derive from active recurring utility types (fallback)
     if (garbageAmount === 0 && maintenanceAmount === 0 && otherUtilitiesAmount === 0) {
-      if (activeUtilityTypes && activeUtilityTypes.length > 0) {
-        activeUtilityTypes.forEach((utility: any) => {
-          const utilityName = utility.name.toLowerCase().trim()
-          const utilityRate = utility.rate || 0
-          
-          if (utilityName.includes('garbage')) {
-            garbageAmount = utilityRate
-          } else if (utilityName.includes('maintenance')) {
-            maintenanceAmount = utilityRate
-          } else {
-            otherUtilitiesAmount += utilityRate
-          }
-        })
-      }
+      const computed = computeUtilityAmounts(activeUtilityTypes || [])
+      garbageAmount = computed.garbageAmount
+      maintenanceAmount = computed.maintenanceAmount
+      otherUtilitiesAmount = computed.otherUtilitiesAmount
     }
 
     // Fetch settings directly to ensure we have the latest values
@@ -1124,22 +1077,12 @@ export default function Billing() {
       console.warn('Failed to sync status for newly created bill:', err)
     }
 
-    // Create utility_bill_items for the bill
+    // Create utility_bill_items for recurring charges (excludes water/electricity)
     if (insertedBill && activeUtilityTypes && activeUtilityTypes.length > 0) {
-      const utilityBillItems = activeUtilityTypes.map((utility: any) => ({
-        bill_id: insertedBill.id,
-        utility_type_id: utility.id,
-        units_consumed: 1, // Default to 1 unit for fixed-rate utilities
-        rate: utility.rate,
-      }))
-
-      const { error: utilityItemsError } = await supabase
-        .from('utility_bill_items')
-        .insert(utilityBillItems)
-      
-      if (utilityItemsError) {
+      try {
+        await syncUtilityBillItemsForBill(insertedBill.id, activeUtilityTypes)
+      } catch (utilityItemsError) {
         console.error('Failed to create utility bill items:', utilityItemsError)
-        // Don't fail the whole operation, just log the error
       }
     }
 
@@ -1231,43 +1174,16 @@ export default function Billing() {
     createUtilityBillMutation.mutate(billData)
   }
 
-  const fetchUtilityBillItemsForBill = async (billId: string) => {
-    const { data, error } = await supabase
-      .from('utility_bill_items')
-      .select('id,bill_id,units_consumed,rate,amount,utility_types(id,name)')
-      .eq('bill_id', billId)
-
-    if (error) {
-      console.error('Failed to load utility bill items for invoice:', error)
-      return []
-    }
-
-    return data || []
-  }
-
-  const fetchUtilityBillItemsForBills = async (billIds: string[]) => {
-    if (!billIds.length) return []
-
-    const { data, error } = await supabase
-      .from('utility_bill_items')
-      .select('id,bill_id,units_consumed,rate,amount,utility_types(id,name)')
-      .in('bill_id', billIds)
-
-    if (error) {
-      console.error('Failed to load utility bill items for bulk invoice:', error)
-      return []
-    }
-
-    return data || []
-  }
-
   const handlePrintBill = async (bill: any) => {
     try {
       const [building_payment, utility_bill_items] = await Promise.all([
         bill.unit_id ? fetchBuildingPaymentByUnitId(bill.unit_id) : Promise.resolve(null),
         bill.id ? fetchUtilityBillItemsForBill(bill.id) : Promise.resolve([]),
       ])
-      await generateInvoicePDF({ ...bill, building_payment, utility_bill_items })
+      await generateInvoicePDF(
+        { ...bill, building_payment, utility_bill_items },
+        activeUtilityTypes || []
+      )
     } catch (error) {
       console.error('Error generating PDF:', error)
       setError('Failed to generate PDF. Please try again.')
@@ -1281,15 +1197,15 @@ export default function Billing() {
     }
     try {
       const billIds = (bills || []).map((b: any) => b.id).filter(Boolean)
-      const allItems = await fetchUtilityBillItemsForBills(billIds)
+      const utilityItemsByBill = await fetchUtilityBillItemsForBills(billIds)
       const enriched = await Promise.all(
         (bills || []).map(async (b: any) => ({
           ...b,
           building_payment: b.unit_id ? await fetchBuildingPaymentByUnitId(b.unit_id) : null,
-          utility_bill_items: allItems.filter((item: any) => item.bill_id === b.id),
+          utility_bill_items: utilityItemsByBill.get(b.id) || [],
         }))
       )
-      await generateBulkInvoicesPDF(enriched)
+      await generateBulkInvoicesPDF(enriched, activeUtilityTypes || [])
     } catch (error) {
       console.error('Error generating bulk PDF:', error)
       setError('Failed to generate bulk PDF. Please try again.')
@@ -2393,46 +2309,11 @@ export default function Billing() {
                         // Preserve negative balances (overpayment) as negative arrears when present
                         newFormData.arrears_brought_forward = computedArrears.toString()
 
-                        // Auto-fill utility amounts from active utility types ONLY
-                        // Reset utility amounts first
-                        newFormData.garbage_amount = '0'
-                        newFormData.maintenance_amount = '0'
-                        newFormData.other_utilities_amount = '0'
-                        
-                        if (activeUtilityTypes && activeUtilityTypes.length > 0) {
-                          console.log('Create Bill Form - Active utility types found:', activeUtilityTypes)
-                          
-                          // Map each active utility type to the correct field
-                          activeUtilityTypes.forEach((utility: any) => {
-                            const utilityName = utility.name.toLowerCase().trim()
-                            // Use the exact rate from the utility type (rate IS the amount for fixed-rate utilities)
-                            const utilityRate = parseFloat(utility.rate) || 0
-                            
-                            console.log(`Processing utility: "${utility.name}" (is_active: ${utility.is_active}), Rate: ${utilityRate}`)
-                            
-                            // Match utility names more flexibly
-                            if (utilityName.includes('garbage')) {
-                              newFormData.garbage_amount = utilityRate.toString()
-                              console.log(`  → Mapped to garbage_amount: ${utilityRate}`)
-                            } else if (utilityName.includes('maintenance')) {
-                              newFormData.maintenance_amount = utilityRate.toString()
-                              console.log(`  → Mapped to maintenance_amount: ${utilityRate}`)
-                            } else {
-                              // All other utilities go to other_utilities_amount
-                              const currentOther = parseFloat(newFormData.other_utilities_amount || '0')
-                              newFormData.other_utilities_amount = (currentOther + utilityRate).toString()
-                              console.log(`  → Mapped to other_utilities_amount: ${utilityRate} (total: ${newFormData.other_utilities_amount})`)
-                            }
-                          })
-                          
-                          console.log('Create Bill Form - Final utility amounts:', {
-                            garbage: newFormData.garbage_amount,
-                            maintenance: newFormData.maintenance_amount,
-                            other: newFormData.other_utilities_amount
-                          })
-                        } else {
-                          console.log('Create Bill Form - No active utility types found')
-                        }
+                        // Auto-fill recurring utility amounts (excludes water/electricity meter utilities)
+                        const computedUtilities = computeUtilityAmounts(activeUtilityTypes || [])
+                        newFormData.garbage_amount = computedUtilities.garbageAmount.toString()
+                        newFormData.maintenance_amount = computedUtilities.maintenanceAmount.toString()
+                        newFormData.other_utilities_amount = computedUtilities.otherUtilitiesAmount.toString()
 
                         setBillFormData(newFormData)
                       }
