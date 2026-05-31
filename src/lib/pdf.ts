@@ -91,7 +91,16 @@ function normalizeUtilityAmount(item: any) {
   return rate * units
 }
 
-function renderUtilityLineItems(doc: any, bill: any, yPos: number) {
+function getNumericValue(value: any) {
+  if (typeof value === 'number') return value
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value)
+    return Number.isNaN(parsed) ? 0 : parsed
+  }
+  return 0
+}
+
+function getRenderedUtilityLineItems(bill: any) {
   const items = Array.isArray(bill.utility_bill_items) ? bill.utility_bill_items : []
   const printableItems = items
     .map((item: any) => ({
@@ -100,33 +109,29 @@ function renderUtilityLineItems(doc: any, bill: any, yPos: number) {
     }))
     .filter((item: any) => item.amount > 0)
 
-  if (printableItems.length > 0) {
-    printableItems.forEach((item: any) => {
-      doc.text(item.label, 20, yPos)
-      doc.text(formatCurrency(item.amount), 180, yPos, { align: 'right' })
-      yPos += 7
-    })
-    return yPos
+  const printedLabels = printableItems.map((item: any) => item.label.toLowerCase())
+  const shouldSkip = (label: string) => printedLabels.some((printed: string) => printed.includes(label))
+
+  const output = [...printableItems]
+  const addLegacy = (label: string, amount: number, skipIfLabel: string[]) => {
+    if (amount > 0 && !skipIfLabel.some(shouldSkip)) {
+      output.push({ label, amount })
+    }
   }
 
-  if (bill.garbage_amount > 0) {
-    doc.text('Garbage', 20, yPos)
-    doc.text(formatCurrency(bill.garbage_amount), 180, yPos, { align: 'right' })
+  addLegacy('Garbage', getNumericValue(bill.garbage_amount), ['garbage'])
+  addLegacy('Maintenance', getNumericValue(bill.maintenance_amount), ['maint'])
+  addLegacy('Other Utilities', getNumericValue(bill.other_utilities_amount), ['other', 'utility'])
+
+  return output
+}
+
+function renderUtilityLineItems(doc: any, lineItems: any[], yPos: number) {
+  lineItems.forEach((item: any) => {
+    doc.text(item.label, 20, yPos)
+    doc.text(formatCurrency(item.amount), 180, yPos, { align: 'right' })
     yPos += 7
-  }
-
-  if (bill.maintenance_amount > 0) {
-    doc.text('Maintenance', 20, yPos)
-    doc.text(formatCurrency(bill.maintenance_amount), 180, yPos, { align: 'right' })
-    yPos += 7
-  }
-
-  if (bill.other_utilities_amount > 0) {
-    doc.text('Other Utilities', 20, yPos)
-    doc.text(formatCurrency(bill.other_utilities_amount), 180, yPos, { align: 'right' })
-    yPos += 7
-  }
-
+  })
   return yPos
 }
 
@@ -181,7 +186,8 @@ export async function generateInvoicePDF(bill: any) {
     yPos += 12
   }
   
-  yPos = renderUtilityLineItems(doc, bill, yPos)
+  const utilityLineItems = getRenderedUtilityLineItems(bill)
+  yPos = renderUtilityLineItems(doc, utilityLineItems, yPos)
   
   if (bill.rent_amount > 0) {
     doc.text('Monthly Rent', 20, yPos)
@@ -196,6 +202,11 @@ export async function generateInvoicePDF(bill: any) {
   }
   
   // Total
+  const utilityTotal = utilityLineItems.reduce((sum, item) => sum + item.amount, 0)
+  const invoiceTotal = getNumericValue(bill.total_amount) + utilityTotal
+  const amountPaid = getNumericValue(bill.amount_paid)
+  const balanceDue = invoiceTotal - amountPaid
+
   yPos += 5
   doc.setLineWidth(0.5)
   doc.line(20, yPos, 190, yPos)
@@ -204,15 +215,15 @@ export async function generateInvoicePDF(bill: any) {
   doc.setFontSize(12)
   doc.setFont('helvetica', 'bold')
   doc.text('Total Amount:', 20, yPos)
-  doc.text(formatCurrency(bill.total_amount), 180, yPos, { align: 'right' })
+  doc.text(formatCurrency(invoiceTotal), 180, yPos, { align: 'right' })
   yPos += 7
   
   doc.setFont('helvetica', 'normal')
-  doc.text(`Amount Paid: ${formatCurrency(bill.amount_paid)}`, 20, yPos)
+  doc.text(`Amount Paid: ${formatCurrency(amountPaid)}`, 20, yPos)
   yPos += 7
   
   doc.setFont('helvetica', 'bold')
-  doc.text(`Balance Due: ${formatCurrency(bill.balance)}`, 20, yPos)
+  doc.text(`Balance Due: ${formatCurrency(balanceDue)}`, 20, yPos)
   
   const globalInv = readGlobalPaymentSettings()
   const resolvedInv = resolvePaymentInstructions(bill.building_payment ?? null, globalInv)
@@ -320,7 +331,8 @@ export async function generateBulkInvoicesPDF(bills: any[]) {
       yPos += 12
     }
     
-    yPos = renderUtilityLineItems(doc, bill, yPos)
+    const utilityLineItems = getRenderedUtilityLineItems(bill)
+    yPos = renderUtilityLineItems(doc, utilityLineItems, yPos)
 
     if (bill.rent_amount > 0) {
       doc.text('Monthly Rent', 20, yPos)
@@ -335,6 +347,11 @@ export async function generateBulkInvoicesPDF(bills: any[]) {
     }
     
     // Total
+    const utilityTotal = utilityLineItems.reduce((sum, item) => sum + item.amount, 0)
+    const invoiceTotal = getNumericValue(bill.total_amount) + utilityTotal
+    const amountPaid = getNumericValue(bill.amount_paid)
+    const balanceDue = invoiceTotal - amountPaid
+
     yPos += 5
     doc.setLineWidth(0.5)
     doc.line(20, yPos, 190, yPos)
@@ -343,15 +360,15 @@ export async function generateBulkInvoicesPDF(bills: any[]) {
     doc.setFontSize(12)
     doc.setFont('helvetica', 'bold')
     doc.text('Total Amount:', 20, yPos)
-    doc.text(formatCurrency(bill.total_amount), 180, yPos, { align: 'right' })
+    doc.text(formatCurrency(invoiceTotal), 180, yPos, { align: 'right' })
     yPos += 7
     
     doc.setFont('helvetica', 'normal')
-    doc.text(`Amount Paid: ${formatCurrency(bill.amount_paid)}`, 20, yPos)
+    doc.text(`Amount Paid: ${formatCurrency(amountPaid)}`, 20, yPos)
     yPos += 7
     
     doc.setFont('helvetica', 'bold')
-    doc.text(`Balance Due: ${formatCurrency(bill.balance)}`, 20, yPos)
+    doc.text(`Balance Due: ${formatCurrency(balanceDue)}`, 20, yPos)
 
     if (resolved.method || resolved.paybill || resolved.account || resolved.notes) {
       yPos += 10
