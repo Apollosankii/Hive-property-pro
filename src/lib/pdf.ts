@@ -82,9 +82,15 @@ export async function generateReceiptPDF(payment: any) {
 export async function generateInvoicePDF(bill: any) {
   const doc = new jsPDF()
   
+  const organizationName = bill.units?.buildings?.name || 'Organization'
+  
   // Header
   doc.setFontSize(20)
   doc.text('INVOICE', 105, 20, { align: 'center' })
+  doc.setFontSize(14)
+  doc.setFont('helvetica', 'bold')
+  doc.text(organizationName, 105, 28, { align: 'center' })
+  doc.setFont('helvetica', 'normal')
   
   doc.setFontSize(10)
   doc.text(`Invoice #: ${bill.id.slice(0, 8).toUpperCase()}`, 20, 35)
@@ -220,11 +226,14 @@ export async function generateBulkInvoicesPDF(bills: any[]) {
     }
 
     const resolved = resolvePaymentInstructions(bill.building_payment ?? null, global)
+    const organizationName = bill.units?.buildings?.name || 'Organization'
     
     // Header
     doc.setFontSize(20)
     doc.setFont('helvetica', 'bold')
     doc.text('INVOICE', 105, 20, { align: 'center' })
+    doc.setFontSize(14)
+    doc.text(organizationName, 105, 28, { align: 'center' })
     
     doc.setFontSize(10)
     doc.setFont('helvetica', 'normal')
