@@ -267,6 +267,7 @@ export default function Billing() {
           
           return {
             ...bill,
+            building_name: buildingName || '',
             units: unitRes.data ? {
               unit_number: unitRes.data.unit_number,
               buildings: buildingName ? { name: buildingName } : null
@@ -1230,10 +1231,43 @@ export default function Billing() {
     createUtilityBillMutation.mutate(billData)
   }
 
+  const fetchUtilityBillItemsForBill = async (billId: string) => {
+    const { data, error } = await supabase
+      .from('utility_bill_items')
+      .select('id,bill_id,units_consumed,rate,amount,utility_types(id,name)')
+      .eq('bill_id', billId)
+
+    if (error) {
+      console.error('Failed to load utility bill items for invoice:', error)
+      return []
+    }
+
+    return data || []
+  }
+
+  const fetchUtilityBillItemsForBills = async (billIds: string[]) => {
+    if (!billIds.length) return []
+
+    const { data, error } = await supabase
+      .from('utility_bill_items')
+      .select('id,bill_id,units_consumed,rate,amount,utility_types(id,name)')
+      .in('bill_id', billIds)
+
+    if (error) {
+      console.error('Failed to load utility bill items for bulk invoice:', error)
+      return []
+    }
+
+    return data || []
+  }
+
   const handlePrintBill = async (bill: any) => {
     try {
-      const building_payment = bill.unit_id ? await fetchBuildingPaymentByUnitId(bill.unit_id) : null
-      await generateInvoicePDF({ ...bill, building_payment })
+      const [building_payment, utility_bill_items] = await Promise.all([
+        bill.unit_id ? fetchBuildingPaymentByUnitId(bill.unit_id) : Promise.resolve(null),
+        bill.id ? fetchUtilityBillItemsForBill(bill.id) : Promise.resolve([]),
+      ])
+      await generateInvoicePDF({ ...bill, building_payment, utility_bill_items })
     } catch (error) {
       console.error('Error generating PDF:', error)
       setError('Failed to generate PDF. Please try again.')
@@ -1246,10 +1280,13 @@ export default function Billing() {
       return
     }
     try {
+      const billIds = (bills || []).map((b: any) => b.id).filter(Boolean)
+      const allItems = await fetchUtilityBillItemsForBills(billIds)
       const enriched = await Promise.all(
         (bills || []).map(async (b: any) => ({
           ...b,
           building_payment: b.unit_id ? await fetchBuildingPaymentByUnitId(b.unit_id) : null,
+          utility_bill_items: allItems.filter((item: any) => item.bill_id === b.id),
         }))
       )
       await generateBulkInvoicesPDF(enriched)

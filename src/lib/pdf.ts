@@ -79,10 +79,66 @@ export async function generateReceiptPDF(payment: any) {
   doc.save(`receipt-${payment.id.slice(0, 8)}.pdf`)
 }
 
+function normalizeUtilityAmount(item: any) {
+  if (!item) return 0
+  if (typeof item.amount === 'number') return item.amount
+  if (typeof item.amount === 'string' && item.amount.trim() !== '') {
+    const parsed = parseFloat(item.amount)
+    if (!Number.isNaN(parsed)) return parsed
+  }
+  const rate = typeof item.rate === 'number' ? item.rate : parseFloat(item.rate || '0') || 0
+  const units = typeof item.units_consumed === 'number' ? item.units_consumed : parseFloat(item.units_consumed || '1') || 0
+  return rate * units
+}
+
+function renderUtilityLineItems(doc: any, bill: any, yPos: number) {
+  const items = Array.isArray(bill.utility_bill_items) ? bill.utility_bill_items : []
+  const printableItems = items
+    .map((item: any) => ({
+      label: item.utility_types?.name || 'Other Utility',
+      amount: normalizeUtilityAmount(item),
+    }))
+    .filter((item: any) => item.amount > 0)
+
+  if (printableItems.length > 0) {
+    printableItems.forEach((item: any) => {
+      doc.text(item.label, 20, yPos)
+      doc.text(formatCurrency(item.amount), 180, yPos, { align: 'right' })
+      yPos += 7
+    })
+    return yPos
+  }
+
+  if (bill.garbage_amount > 0) {
+    doc.text('Garbage', 20, yPos)
+    doc.text(formatCurrency(bill.garbage_amount), 180, yPos, { align: 'right' })
+    yPos += 7
+  }
+
+  if (bill.maintenance_amount > 0) {
+    doc.text('Maintenance', 20, yPos)
+    doc.text(formatCurrency(bill.maintenance_amount), 180, yPos, { align: 'right' })
+    yPos += 7
+  }
+
+  if (bill.other_utilities_amount > 0) {
+    doc.text('Other Utilities', 20, yPos)
+    doc.text(formatCurrency(bill.other_utilities_amount), 180, yPos, { align: 'right' })
+    yPos += 7
+  }
+
+  return yPos
+}
+
 export async function generateInvoicePDF(bill: any) {
   const doc = new jsPDF()
   
-  const organizationName = bill.units?.buildings?.name || 'Organization'
+  const organizationName =
+    bill.building_name ||
+    bill.units?.buildings?.name ||
+    bill.units?.building?.name ||
+    bill.building?.name ||
+    'Organization'
   
   // Header
   doc.setFontSize(20)
@@ -125,23 +181,7 @@ export async function generateInvoicePDF(bill: any) {
     yPos += 12
   }
   
-  if (bill.garbage_amount > 0) {
-    doc.text('Garbage', 20, yPos)
-    doc.text(formatCurrency(bill.garbage_amount), 180, yPos, { align: 'right' })
-    yPos += 7
-  }
-  
-  if (bill.maintenance_amount > 0) {
-    doc.text('Maintenance', 20, yPos)
-    doc.text(formatCurrency(bill.maintenance_amount), 180, yPos, { align: 'right' })
-    yPos += 7
-  }
-  
-  if (bill.other_utilities_amount > 0) {
-    doc.text('Other Utilities', 20, yPos)
-    doc.text(formatCurrency(bill.other_utilities_amount), 180, yPos, { align: 'right' })
-    yPos += 7
-  }
+  yPos = renderUtilityLineItems(doc, bill, yPos)
   
   if (bill.rent_amount > 0) {
     doc.text('Monthly Rent', 20, yPos)
@@ -226,7 +266,12 @@ export async function generateBulkInvoicesPDF(bills: any[]) {
     }
 
     const resolved = resolvePaymentInstructions(bill.building_payment ?? null, global)
-    const organizationName = bill.units?.buildings?.name || 'Organization'
+    const organizationName =
+      bill.building_name ||
+      bill.units?.buildings?.name ||
+      bill.units?.building?.name ||
+      bill.building?.name ||
+      'Organization'
     
     // Header
     doc.setFontSize(20)
@@ -275,30 +320,14 @@ export async function generateBulkInvoicesPDF(bills: any[]) {
       yPos += 12
     }
     
+    yPos = renderUtilityLineItems(doc, bill, yPos)
+
     if (bill.rent_amount > 0) {
       doc.text('Monthly Rent', 20, yPos)
       doc.text(formatCurrency(bill.rent_amount), 180, yPos, { align: 'right' })
       yPos += 7
     }
-    
-    if (bill.garbage_amount > 0) {
-      doc.text('Garbage', 20, yPos)
-      doc.text(formatCurrency(bill.garbage_amount), 180, yPos, { align: 'right' })
-      yPos += 7
-    }
-    
-    if (bill.maintenance_amount > 0) {
-      doc.text('Maintenance', 20, yPos)
-      doc.text(formatCurrency(bill.maintenance_amount), 180, yPos, { align: 'right' })
-      yPos += 7
-    }
-    
-    if (bill.other_utilities_amount > 0) {
-      doc.text('Other Utilities', 20, yPos)
-      doc.text(formatCurrency(bill.other_utilities_amount), 180, yPos, { align: 'right' })
-      yPos += 7
-    }
-    
+
     if (bill.arrears_brought_forward > 0) {
       doc.text('Arrears Brought Forward', 20, yPos)
       doc.text(formatCurrency(bill.arrears_brought_forward), 180, yPos, { align: 'right' })
