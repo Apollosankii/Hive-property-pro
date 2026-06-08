@@ -314,7 +314,7 @@ export default function Billing() {
             bill.tenant_id
               ? supabase
                   .from('tenants')
-                  .select('name')
+                  .select('name, phone')
                   .eq('id', bill.tenant_id)
                   .single()
               : Promise.resolve({ data: null, error: null })
@@ -340,7 +340,7 @@ export default function Billing() {
               building_id: unitRes.data.building_id,
               buildings: buildingName ? { name: buildingName } : null
             } : null,
-            tenants: tenantRes.data ? { name: tenantRes.data.name } : null
+            tenants: tenantRes.data ? { name: tenantRes.data.name, phone: tenantRes.data.phone } : null
           }
         })
       )
