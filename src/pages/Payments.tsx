@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Plus, Download, DollarSign, CheckCircle } from 'lucide-react'
 import { generateReceiptPDF } from '@/lib/pdf'
+import { compareByBuildingThenUnit } from '@/lib/property-sort'
 import { fetchBuildingPaymentByUnitId, readGlobalPaymentSettings, resolvePaymentInstructions, buildingHasPaymentOverride } from '@/lib/payment-instructions'
 
 function billingMonthKey(billingMonth: string): string {
@@ -239,9 +240,7 @@ export default function Payments() {
         })
       )
 
-      billsWithRelations.sort((a: any, b: any) =>
-        (b.units?.unit_number || '').toString().localeCompare((a.units?.unit_number || '').toString())
-      )
+      billsWithRelations.sort(compareByBuildingThenUnit)
 
       return billsWithRelations
     },

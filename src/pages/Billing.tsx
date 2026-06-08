@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback, Fragment } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatMonth } from '@/lib/utils'
 import { generateInvoicePDF, generateBulkInvoicesPDF } from '@/lib/pdf'
 import { exportBillsToExcel } from '@/lib/excel'
 import { importBillsFromFile } from '@/lib/excel-import'
-import { fetchBuildingPaymentByUnitId } from '@/lib/payment-instructions'
+import { fetchBuildingPaymentByUnitId, buildingHasPaymentOverride, readGlobalPaymentSettings } from '@/lib/payment-instructions'
+import { filterByBuildingId, groupByBuilding, sortByBuildingThenUnit } from '@/lib/property-sort'
 import {
   buildUtilityBillItemRows,
   computeUtilityAmounts,
@@ -59,12 +60,15 @@ export default function Billing() {
   // const [utilityConsumptions, setUtilityConsumptions] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [selectedBuildingId, setSelectedBuildingId] = useState('')
   const [showImportModal, setShowImportModal] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [paymentBuildingId, setPaymentBuildingId] = useState('')
   const [paymentFormData, setPaymentFormData] = useState({
     payment_method: '',
     paybill: '',
     account_number: '',
+    payment_notes: '',
   })
 
   const [importFile, setImportFile] = useState<File | null>(null)
@@ -97,33 +101,87 @@ export default function Billing() {
     return text || defaultMsg || 'An unexpected error occurred. Please try again.'
   }
 
-  useEffect(() => {
-    const stored = localStorage.getItem('app-settings')
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored)
-        setPaymentFormData({
-          payment_method: parsed.payment_method || '',
-          paybill: parsed.paybill || '',
-          account_number: parsed.account_number || '',
-        })
-      } catch (e) {
-        // ignore
-      }
-    }
-  }, [])
+  const { data: buildingsList = [] } = useQuery({
+    queryKey: ['buildings-list-billing'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('buildings')
+        .select('id,name,payment_method_label,payment_paybill,payment_account_number,payment_notes')
+        .order('name')
+      if (error) throw error
+      return data || []
+    },
+    staleTime: 1000 * 60 * 5,
+  })
 
-  const savePaymentSettings = () => {
-    try {
-      const stored = localStorage.getItem('app-settings')
-      const parsed = stored ? JSON.parse(stored) : {}
-      const merged = { ...parsed, ...paymentFormData }
-      localStorage.setItem('app-settings', JSON.stringify(merged))
-      setShowPaymentModal(false)
-    } catch (e) {
-      console.error('Failed to save payment settings', e)
-      toast.error('Failed to save payment settings')
+  const selectedBuildingRow = useMemo(
+    () => (buildingsList as any[]).find((b) => b.id === selectedBuildingId) ?? null,
+    [buildingsList, selectedBuildingId]
+  )
+
+  useEffect(() => {
+    if (!showPaymentModal) return
+    if (paymentBuildingId) {
+      const row = (buildingsList as any[])?.find((b) => b.id === paymentBuildingId)
+      if (row) {
+        setPaymentFormData({
+          payment_method: row.payment_method_label ?? '',
+          paybill: row.payment_paybill ?? '',
+          account_number: row.payment_account_number ?? '',
+          payment_notes: row.payment_notes ?? '',
+        })
+      }
+      return
     }
+    const global = readGlobalPaymentSettings()
+    setPaymentFormData({
+      payment_method: global.payment_method ?? '',
+      paybill: global.paybill ?? '',
+      account_number: global.account_number ?? '',
+      payment_notes: '',
+    })
+  }, [showPaymentModal, paymentBuildingId, buildingsList])
+
+  const savePaymentSettings = async () => {
+    try {
+      if (paymentBuildingId) {
+        const { error } = await supabase
+          .from('buildings')
+          .update({
+            payment_method_label: paymentFormData.payment_method.trim() || null,
+            payment_paybill: paymentFormData.paybill.trim() || null,
+            payment_account_number: paymentFormData.account_number.trim() || null,
+            payment_notes: paymentFormData.payment_notes.trim() || null,
+          })
+          .eq('id', paymentBuildingId)
+
+        if (error) throw error
+        await queryClient.invalidateQueries({ queryKey: ['buildings-list-billing'] })
+        await queryClient.invalidateQueries({ queryKey: ['buildings-list-payments'] })
+        await queryClient.invalidateQueries({ queryKey: ['buildings'] })
+        toast.success('Payment details saved for this property.')
+      } else {
+        const stored = localStorage.getItem('app-settings')
+        const parsed = stored ? JSON.parse(stored) : {}
+        const merged = {
+          ...parsed,
+          payment_method: paymentFormData.payment_method,
+          paybill: paymentFormData.paybill,
+          account_number: paymentFormData.account_number,
+        }
+        localStorage.setItem('app-settings', JSON.stringify(merged))
+        toast.success('Global payment defaults saved.')
+      }
+      setShowPaymentModal(false)
+    } catch (e: any) {
+      console.error('Failed to save payment settings', e)
+      toast.error(e?.message || 'Failed to save payment settings')
+    }
+  }
+
+  const openPaymentModal = () => {
+    setPaymentBuildingId(selectedBuildingId || '')
+    setShowPaymentModal(true)
   }
 
 
@@ -279,6 +337,7 @@ export default function Billing() {
             building_name: buildingName || '',
             units: unitRes.data ? {
               unit_number: unitRes.data.unit_number,
+              building_id: unitRes.data.building_id,
               buildings: buildingName ? { name: buildingName } : null
             } : null,
             tenants: tenantRes.data ? { name: tenantRes.data.name } : null
@@ -286,9 +345,7 @@ export default function Billing() {
         })
       )
       
-      // Sort by unit number descending to show highest units first
-      billsWithRelations.sort((a: any, b: any) => (b.units?.unit_number || '').toString().localeCompare((a.units?.unit_number || '').toString()))
-      return billsWithRelations
+      return sortByBuildingThenUnit(billsWithRelations)
     },
     staleTime: 0,
     refetchOnMount: true,
@@ -339,27 +396,43 @@ export default function Billing() {
             id: unit.id,
             unit_number: unit.unit_number,
             monthly_rent: unit.monthly_rent,
+            building_id: unit.building_id,
             buildings: buildingRes.data ? { name: buildingRes.data.name } : null,
             tenants: tenantRes.data ? { id: tenantRes.data.id, name: tenantRes.data.name } : null
           }
         })
       )
       
-      return unitsWithRelations
+      return sortByBuildingThenUnit(unitsWithRelations)
     },
     staleTime: 0,
     refetchOnMount: true,
   })
 
-  const filteredBills = (bills || []).filter((b: any) => {
-    if (!search) return true
+  const filteredBills = useMemo(() => {
+    let rows = bills || []
+    rows = filterByBuildingId(rows, selectedBuildingId)
+    if (!search) return rows
     const q = search.toLowerCase()
-    return (
+    return rows.filter((b: any) =>
       (b.units?.unit_number || '').toString().toLowerCase().includes(q) ||
       (b.tenants?.name || '').toLowerCase().includes(q) ||
-      (b.units?.buildings?.name || '').toLowerCase().includes(q)
+      (b.units?.buildings?.name || '').toLowerCase().includes(q) ||
+      (b.building_name || '').toLowerCase().includes(q)
     )
-  })
+  }, [bills, selectedBuildingId, search])
+
+  const groupedBills = useMemo(() => groupByBuilding(filteredBills), [filteredBills])
+
+  const occupiedUnitsForBuilding = useMemo(
+    () => filterByBuildingId(occupiedUnits || [], selectedBuildingId),
+    [occupiedUnits, selectedBuildingId]
+  )
+
+  const groupedOccupiedUnits = useMemo(
+    () => groupByBuilding(occupiedUnitsForBuilding),
+    [occupiedUnitsForBuilding]
+  )
 
   // Query to get all units for creating a single bill
   const { data: allUnits } = useQuery({
@@ -392,9 +465,28 @@ export default function Billing() {
         })
       )
       
-      return unitsWithRelations
+      return sortByBuildingThenUnit(unitsWithRelations)
     },
   })
+
+  const renderUnitOptions = useCallback(
+    (units?: any[], buildingFilter?: string) => {
+      const source = buildingFilter
+        ? filterByBuildingId(units || [], buildingFilter)
+        : units || []
+      return groupByBuilding(source).map((group) => (
+        <optgroup key={group.buildingId} label={group.buildingName}>
+          {group.items.map((unit: any) => (
+            <option key={unit.id} value={unit.id}>
+              {unit.unit_number}
+              {unit.tenants?.name ? ` (${unit.tenants.name})` : unit.status === 'vacant' ? ' (Vacant)' : ''}
+            </option>
+          ))}
+        </optgroup>
+      ))
+    },
+    []
+  )
 
   // Fetch active utility types for the logged-in landlord only
   const { data: activeUtilityTypes } = useQuery({
@@ -466,7 +558,8 @@ export default function Billing() {
 
   const generateBillsMutation = useMutation({
     mutationFn: async () => {
-      if (!occupiedUnits) return
+      const unitsToBill = occupiedUnitsForBuilding
+      if (!unitsToBill || unitsToBill.length === 0) return
 
       // AUTOMATIC ARREARS CALCULATION:
       // The system automatically calculates and carries forward arrears from the previous month.
@@ -560,7 +653,7 @@ export default function Billing() {
         console.log('Bulk generation - Final amounts:', { garbageAmount, maintenanceAmount, otherUtilitiesAmount })
       }
 
-      const unitIds = occupiedUnits.map((u: any) => u.id)
+      const unitIds = unitsToBill.map((u: any) => u.id)
 
       const { data: existingMonthBills, error: existingErr } = await supabase
         .from('bills')
@@ -575,7 +668,7 @@ export default function Billing() {
       const toUpdate: { id: string; unitId: string; patch: Record<string, unknown> }[] = []
       const billIdByUnitId = new Map<string, string>()
 
-      for (const unit of occupiedUnits) {
+      for (const unit of unitsToBill) {
         const readings = meterReadings[unit.id] || {
           water_prev: prevMeterReadings.get(unit.id)?.water || 0,
           water_current: prevMeterReadings.get(unit.id)?.water || 0,
@@ -705,8 +798,12 @@ export default function Billing() {
       return
     }
     
-    if (!occupiedUnits || occupiedUnits.length === 0) {
-      toast.info('No occupied units found. Please assign tenants to units first.')
+    if (!occupiedUnitsForBuilding || occupiedUnitsForBuilding.length === 0) {
+      toast.info(
+        selectedBuildingId
+          ? 'No occupied units in the selected property. Choose another property or clear the filter.'
+          : 'No occupied units found. Please assign tenants to units first.'
+      )
       return
     }
 
@@ -715,7 +812,7 @@ export default function Billing() {
       try {
         const readingsMap: Record<string, any> = {}
         await Promise.all(
-          occupiedUnits.map(async (unit: any) => {
+          occupiedUnitsForBuilding.map(async (unit: any) => {
             const latest = await fetchLatestMeterReadings(unit.id)
             readingsMap[unit.id] = {
               water_prev: latest.water || 0,
@@ -1196,15 +1293,15 @@ export default function Billing() {
   }
 
   const handlePrintBulkBills = async () => {
-    if (!bills || bills.length === 0) {
+    if (!filteredBills || filteredBills.length === 0) {
       setError('No bills to print')
       return
     }
     try {
-      const billIds = (bills || []).map((b: any) => b.id).filter(Boolean)
+      const billIds = filteredBills.map((b: any) => b.id).filter(Boolean)
       const utilityItemsByBill = await fetchUtilityBillItemsForBills(billIds)
       const enriched = await Promise.all(
-        (bills || []).map(async (b: any) => ({
+        filteredBills.map(async (b: any) => ({
           ...b,
           building_payment: b.unit_id ? await fetchBuildingPaymentByUnitId(b.unit_id) : null,
           utility_bill_items: utilityItemsByBill.get(b.id) || [],
@@ -1227,11 +1324,11 @@ export default function Billing() {
   }
 
   const handleExportAllBillsToExcel = () => {
-    if (!bills || bills.length === 0) {
+    if (!filteredBills || filteredBills.length === 0) {
       setError('No bills to export')
       return
     }
-    setExportBillsToUse(bills)
+    setExportBillsToUse(filteredBills)
     setShowExportModal(true)
   }
 
@@ -1343,19 +1440,19 @@ export default function Billing() {
           <button
             onClick={handleGenerateBills}
             className="btn btn-primary"
-            disabled={!!occupiedUnitsError || !occupiedUnits || occupiedUnits.length === 0}
+            disabled={!!occupiedUnitsError || !occupiedUnitsForBuilding || occupiedUnitsForBuilding.length === 0}
           >
             <Plus size={18} className="sm:size-5" />
             <span className="hidden sm:inline">Generate Bills</span>
             <span className="sm:hidden">Generate</span>
-            {occupiedUnits && occupiedUnits.length > 0 && (
+            {occupiedUnitsForBuilding && occupiedUnitsForBuilding.length > 0 && (
               <span className="ml-2 text-xs bg-white/20 px-2 py-0.5 rounded-full">
-                {occupiedUnits.length}
+                {occupiedUnitsForBuilding.length}
               </span>
             )}
           </button>
           <button
-            onClick={() => setShowPaymentModal(true)}
+            onClick={openPaymentModal}
             className="btn btn-secondary"
             title="Payment Info (paybill/account)"
           >
@@ -1373,7 +1470,7 @@ export default function Billing() {
             <span className="hidden sm:inline">Import File</span>
             <span className="sm:hidden">Import</span>
           </button>
-          {bills && bills.length > 0 && (
+          {filteredBills.length > 0 && (
             <>
               <button
                 onClick={handlePrintBulkBills}
@@ -1419,13 +1516,34 @@ export default function Billing() {
         </div>
       )}
 
-      <div className="p-3 flex items-center justify-end">
+      <div className="card p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-300 whitespace-nowrap">Property</label>
+          <select
+            value={selectedBuildingId}
+            onChange={(e) => setSelectedBuildingId(e.target.value)}
+            className="input min-w-[200px]"
+            title="Filter bills, meter readings, and generation by property"
+          >
+            <option value="">All properties</option>
+            {(buildingsList as any[]).map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+          {selectedBuildingId && selectedBuildingRow && (
+            <span className="text-xs text-slate-500">
+              Showing {filteredBills.length} bill{filteredBills.length === 1 ? '' : 's'} for {selectedBuildingRow.name}
+            </span>
+          )}
+        </div>
         <input
           type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search bills..."
-          className="input w-64"
+          className="input w-full sm:w-64"
         />
       </div>
 
@@ -1459,7 +1577,17 @@ export default function Billing() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredBills.map((bill: any) => {
+                  {groupedBills.map((group) => (
+                    <Fragment key={group.buildingId}>
+                      <tr className="bg-slate-100/90 dark:bg-zinc-800/80">
+                        <td colSpan={12} className="py-2 px-3 text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 uppercase tracking-wide">
+                          {group.buildingName}
+                          <span className="ml-2 font-normal text-slate-500 normal-case">
+                            ({group.items.length} unit{group.items.length === 1 ? '' : 's'})
+                          </span>
+                        </td>
+                      </tr>
+                      {group.items.map((bill: any) => {
                     const totalUtilities = (bill.garbage_amount || 0) + (bill.maintenance_amount || 0) + (bill.other_utilities_amount || 0)
                     return (
                       <tr key={bill.id}>
@@ -1601,11 +1729,17 @@ export default function Billing() {
                         </td>
                       </tr>
                     )
-                  })}
+                      })}
+                    </Fragment>
+                  ))}
                 </tbody>
               </table>
             </div>
           </div>
+        </div>
+      ) : filteredBills.length === 0 && bills && bills.length > 0 ? (
+        <div className="card text-center py-12">
+          <p className="text-slate-600">No bills match the selected property or search.</p>
         </div>
       ) : (
         <div className="card text-center py-16">
@@ -1632,7 +1766,9 @@ export default function Billing() {
             <div className="p-6">
               <h2 className="text-2xl font-bold text-slate-900 mb-2">Enter Meter Readings</h2>
               <p className="text-slate-600 mb-6">
-                Enter current meter readings for all units. Previous readings will be auto-filled where available.
+                {selectedBuildingId && selectedBuildingRow
+                  ? `Enter meter readings for ${selectedBuildingRow.name} only. Previous readings are auto-filled where available.`
+                  : 'Enter current meter readings grouped by property. Previous readings will be auto-filled where available.'}
               </p>
               
               {/* Rate inputs for bulk generation */}
@@ -1669,8 +1805,16 @@ export default function Billing() {
                 </div>
               </div>
             
-              <div className="space-y-4 mb-6 max-h-[60vh] overflow-y-auto pr-2">
-                {occupiedUnits?.map((unit: any) => {
+              <div className="space-y-6 mb-6 max-h-[60vh] overflow-y-auto pr-2">
+                {groupedOccupiedUnits.map((group) => (
+                  <div key={group.buildingId} className="space-y-3">
+                    <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 uppercase tracking-wide border-b border-slate-200 dark:border-zinc-700 pb-2 sticky top-0 bg-white dark:bg-zinc-900 z-10">
+                      {group.buildingName}
+                      <span className="ml-2 font-normal text-slate-500 normal-case text-xs">
+                        ({group.items.length} unit{group.items.length === 1 ? '' : 's'})
+                      </span>
+                    </h3>
+                    {group.items.map((unit: any) => {
                   const readings = meterReadings[unit.id] || {
                     water_prev: 0,
                     water_current: 0,
@@ -1680,9 +1824,10 @@ export default function Billing() {
                   
                   return (
                     <div key={unit.id} className="border border-slate-200 rounded-xl p-4 bg-slate-50/50">
-                      <h3 className="font-semibold text-slate-900 mb-3">
-                        {unit.unit_number} - {unit.buildings?.name}
-                      </h3>
+                      <h4 className="font-semibold text-slate-900 mb-3">
+                        Unit {unit.unit_number}
+                        {unit.tenants?.name ? ` · ${unit.tenants.name}` : ''}
+                      </h4>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div>
                           <label className="block text-xs font-semibold text-slate-700 mb-1.5">Water Previous</label>
@@ -1762,6 +1907,8 @@ export default function Billing() {
                     </div>
                   )
                 })}
+                  </div>
+                ))}
               </div>
 
               <div className="flex gap-3 pt-4 border-t border-slate-200">
@@ -2136,11 +2283,7 @@ export default function Billing() {
                     className="input"
                   >
                     <option value="">Select a unit</option>
-                    {allUnits?.map((unit: any) => (
-                      <option key={unit.id} value={unit.id}>
-                        {unit.unit_number} - {unit.buildings?.name || 'N/A'} {unit.tenants?.name ? `(${unit.tenants.name})` : '(Vacant)'}
-                      </option>
-                    ))}
+                    {renderUnitOptions(allUnits, selectedBuildingId)}
                   </select>
                 </div>
 
@@ -2327,11 +2470,7 @@ export default function Billing() {
                     required
                   >
                     <option value="">Select a unit</option>
-                    {allUnits?.map((unit: any) => (
-                      <option key={unit.id} value={unit.id}>
-                        {unit.unit_number} - {unit.buildings?.name} {unit.tenants ? `(${unit.tenants.name})` : '(Vacant)'}
-                      </option>
-                    ))}
+                    {renderUnitOptions(allUnits, selectedBuildingId)}
                   </select>
                 </div>
 
@@ -2665,9 +2804,36 @@ export default function Billing() {
           <div className="modal-content max-w-lg" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
               <h2 className="text-2xl font-bold text-slate-900 mb-2">Payment Details</h2>
-              <p className="text-sm text-slate-600 mb-4">Set default payment method, paybill and account number to appear on generated invoices and receipts.</p>
+              <p className="text-sm text-slate-600 mb-4">
+                Configure paybill and account instructions per property, or set global defaults used when a property has no override.
+              </p>
 
               <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Property</label>
+                  <select
+                    value={paymentBuildingId}
+                    onChange={(e) => setPaymentBuildingId(e.target.value)}
+                    className="input"
+                  >
+                    <option value="">Global default (all properties without override)</option>
+                    {(buildingsList as any[]).map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                  {paymentBuildingId && buildingHasPaymentOverride(
+                    (buildingsList as any[]).find((b) => b.id === paymentBuildingId) ?? null
+                  ) ? (
+                    <p className="text-xs text-emerald-700 mt-1">This property has its own payment instructions.</p>
+                  ) : paymentBuildingId ? (
+                    <p className="text-xs text-slate-500 mt-1">Leave blank fields to fall back to global defaults on invoices.</p>
+                  ) : (
+                    <p className="text-xs text-slate-500 mt-1">Used on invoices when a property has no building-specific details.</p>
+                  )}
+                </div>
+
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">Payment Method</label>
                   <select
@@ -2705,6 +2871,19 @@ export default function Billing() {
                     placeholder="e.g. ACC-1001 or tenant name"
                   />
                 </div>
+
+                {paymentBuildingId && (
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">Notes for tenants</label>
+                    <textarea
+                      value={paymentFormData.payment_notes}
+                      onChange={(e) => setPaymentFormData(prev => ({ ...prev, payment_notes: e.target.value }))}
+                      className="input"
+                      rows={2}
+                      placeholder="Short instructions shown on this property's invoices"
+                    />
+                  </div>
+                )}
 
                 <div className="flex gap-3 pt-4 border-t border-slate-200">
                   <button
