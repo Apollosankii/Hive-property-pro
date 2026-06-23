@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, Fragment } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatMonth } from '@/lib/utils'
@@ -10,9 +11,16 @@ import { filterByBuildingId, groupByBuilding, sortByBuildingThenUnit } from '@/l
 import {
   buildUtilityBillItemRows,
   computeUtilityAmounts,
+  deriveBillUtilityColumns,
   fetchUtilityBillItemsForBill,
   fetchUtilityBillItemsForBills,
-  syncUtilityBillItemsForBill,
+  filterRecurringUtilities,
+  lineItemsFromBillItems,
+  lineItemsFromLegacyBill,
+  lineItemsFromUtilityTypes,
+  syncUtilityBillItemsFromLineItems,
+  utilityLineItemsSubtotal,
+  type BillUtilityLineItem,
 } from '@/lib/recurring-utilities'
 import ExportColumnsModal from '@/components/ExportColumnsModal'
 import useToast from '@/hooks/useToast'
@@ -77,6 +85,8 @@ export default function Billing() {
   const [importResult, setImportResult] = useState<{ success: number; errors: string[] } | null>(null)
   const [showExportModal, setShowExportModal] = useState(false)
   const [exportBillsToUse, setExportBillsToUse] = useState<any[]>([])
+  const [utilityLineItems, setUtilityLineItems] = useState<BillUtilityLineItem[]>([])
+  const [showAddChargeMenu, setShowAddChargeMenu] = useState(false)
   const queryClient = useQueryClient()
   const toast = useToast()
   const { user } = useAuthStore()
@@ -514,6 +524,171 @@ export default function Billing() {
     refetchOnWindowFocus: true,
   })
 
+  const { data: allUtilityTypes } = useQuery({
+    queryKey: ['utility-types', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return []
+
+      const { data, error } = await supabase
+        .from('utility_types')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('display_order', { ascending: true })
+
+      if (error) throw error
+      return data || []
+    },
+    enabled: !!user?.id,
+    staleTime: 0,
+    refetchOnMount: true,
+  })
+
+  const resetUtilityLineItemsFromActive = useCallback(() => {
+    setUtilityLineItems(lineItemsFromUtilityTypes(activeUtilityTypes || []))
+  }, [activeUtilityTypes])
+
+  const loadUtilityLineItemsForBill = useCallback(
+    async (bill: any) => {
+      const catalog = filterRecurringUtilities(allUtilityTypes || activeUtilityTypes || [])
+      try {
+        const items = bill?.id ? await fetchUtilityBillItemsForBill(bill.id) : []
+        if (items.length > 0) {
+          setUtilityLineItems(lineItemsFromBillItems(items))
+        } else {
+          setUtilityLineItems(lineItemsFromLegacyBill(bill, catalog))
+        }
+      } catch (err) {
+        console.error('Failed to load utility line items:', err)
+        setUtilityLineItems(lineItemsFromLegacyBill(bill, catalog))
+      }
+    },
+    [activeUtilityTypes, allUtilityTypes]
+  )
+
+  const updateUtilityLineAmount = useCallback((utilityTypeId: string, amount: string) => {
+    const parsed = parseFloat(amount)
+    setUtilityLineItems((prev) =>
+      prev.map((item) =>
+        item.utility_type_id === utilityTypeId
+          ? { ...item, amount: Number.isFinite(parsed) ? parsed : 0 }
+          : item
+      )
+    )
+  }, [])
+
+  const addUtilityLineItem = useCallback((utility: { id: string; name: string; rate?: number; display_order?: number }) => {
+    setUtilityLineItems((prev) => {
+      if (prev.some((item) => item.utility_type_id === utility.id)) return prev
+      return [
+        ...prev,
+        {
+          utility_type_id: utility.id,
+          name: utility.name,
+          amount: utility.rate ?? 0,
+          display_order: utility.display_order,
+        },
+      ].sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))
+    })
+    setShowAddChargeMenu(false)
+  }, [])
+
+  const removeUtilityLineItem = useCallback((utilityTypeId: string) => {
+    setUtilityLineItems((prev) => prev.filter((item) => item.utility_type_id !== utilityTypeId))
+  }, [])
+
+  const availableChargesToAdd = useMemo(() => {
+    const onForm = new Set(utilityLineItems.map((item) => item.utility_type_id))
+    return filterRecurringUtilities(allUtilityTypes || []).filter((u) => !onForm.has(u.id))
+  }, [allUtilityTypes, utilityLineItems])
+
+  const utilityChargesSubtotal = useMemo(
+    () => utilityLineItemsSubtotal(utilityLineItems),
+    [utilityLineItems]
+  )
+
+  const renderAdditionalChargesSection = () => (
+    <div className="space-y-3 border border-slate-200 dark:border-zinc-800 rounded-xl p-4 bg-slate-50/50 dark:bg-zinc-900/30">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800 dark:text-zinc-200">Additional Charges</h3>
+          <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
+            Service charge, penalty, garbage, and other recurring charges from Settings
+          </p>
+        </div>
+        <Link to="/settings" className="text-xs text-primary-600 hover:underline shrink-0">
+          Manage types in Settings
+        </Link>
+      </div>
+
+      {utilityLineItems.length === 0 ? (
+        <p className="text-sm text-slate-500 dark:text-zinc-400 py-2">
+          No charge types configured. Add utility types in Settings, then return here.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {utilityLineItems.map((item) => (
+            <div key={item.utility_type_id} className="flex items-center gap-2">
+              <label className="flex-1 text-sm font-medium text-slate-700 dark:text-zinc-300 min-w-0 truncate" title={item.name}>
+                {item.name}
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={item.amount === 0 ? '' : item.amount}
+                onChange={(e) => updateUtilityLineAmount(item.utility_type_id, e.target.value)}
+                placeholder="0.00"
+                className="input w-32 shrink-0"
+              />
+              <button
+                type="button"
+                onClick={() => removeUtilityLineItem(item.utility_type_id)}
+                className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg shrink-0"
+                title="Remove charge from this bill"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-2 border-t border-slate-200 dark:border-zinc-800">
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setShowAddChargeMenu((open) => !open)}
+            disabled={availableChargesToAdd.length === 0}
+            className="btn btn-secondary text-sm py-2"
+          >
+            <Plus size={16} />
+            Add charge
+          </button>
+          {showAddChargeMenu && availableChargesToAdd.length > 0 && (
+            <div className="absolute left-0 top-full mt-1 z-20 min-w-[200px] max-h-48 overflow-y-auto bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-xl shadow-lg py-1">
+              {availableChargesToAdd.map((utility) => (
+                <button
+                  key={utility.id}
+                  type="button"
+                  onClick={() => addUtilityLineItem(utility)}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-slate-100 dark:hover:bg-zinc-800"
+                >
+                  {utility.name}
+                  {!utility.is_active && (
+                    <span className="ml-1 text-xs text-slate-400">(inactive)</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <p className="text-sm font-semibold text-slate-700 dark:text-zinc-300">
+          Subtotal: {formatCurrency(utilityChargesSubtotal)}
+        </p>
+      </div>
+    </div>
+  )
+
   const fetchAdvanceCreditsForMonth = async (monthStr: string) => {
     const { data, error } = await supabase
       .from('advance_payments')
@@ -850,13 +1025,24 @@ export default function Billing() {
 
   // Edit bill mutation
   const updateBillMutation = useMutation({
-    mutationFn: async ({ id, updates }: { id: string, updates: any }) => {
+    mutationFn: async ({
+      id,
+      updates,
+      lineItems,
+    }: {
+      id: string
+      updates: any
+      lineItems?: BillUtilityLineItem[]
+    }) => {
       const { error } = await supabase
         .from('bills')
         .update(updates)
         .eq('id', id)
-      
+
       if (error) throw error
+      if (lineItems) {
+        await syncUtilityBillItemsFromLineItems(id, lineItems)
+      }
       await syncBillStatus(id)
     },
     onSuccess: async () => {
@@ -867,6 +1053,8 @@ export default function Billing() {
       await queryClient.refetchQueries({ queryKey: ['dashboard-stats'] })
       setShowEditBillModal(false)
       setEditingBill(null)
+      setUtilityLineItems([])
+      setShowAddChargeMenu(false)
       setError(null)
       setBillFormData({
         water_prev_reading: '',
@@ -933,18 +1121,22 @@ export default function Billing() {
 
   // Create utility-only bill mutation
   const createUtilityBillMutation = useMutation({
-    mutationFn: async (billData: any) => {
+    mutationFn: async ({
+      billData,
+      lineItems,
+    }: {
+      billData: any
+      lineItems: BillUtilityLineItem[]
+    }) => {
       const { data, error } = await supabase
         .from('bills')
         .insert([billData])
         .select()
         .single()
-      
+
       if (error) throw error
       if (data?.id) {
-        if (activeUtilityTypes && activeUtilityTypes.length > 0) {
-          await syncUtilityBillItemsForBill(data.id, activeUtilityTypes)
-        }
+        await syncUtilityBillItemsFromLineItems(data.id, lineItems)
         await syncBillStatus(data.id)
       }
     },
@@ -956,6 +1148,8 @@ export default function Billing() {
       await queryClient.refetchQueries({ queryKey: ['dashboard-stats'] })
       setShowCreateUtilityBillModal(false)
       setSelectedUnitForBill('')
+      setUtilityLineItems([])
+      setShowAddChargeMenu(false)
       setError(null)
       setBillFormData({
         water_prev_reading: '',
@@ -1009,7 +1203,7 @@ export default function Billing() {
     }
   }
 
-  const handleEditBill = (bill: any) => {
+  const handleEditBill = async (bill: any) => {
     setEditingBill(bill)
     setEditingBillTenantId(bill.tenant_id || '')
     setBillFormData({
@@ -1026,21 +1220,19 @@ export default function Billing() {
       other_utilities_amount: bill.other_utilities_amount?.toString() || '0',
       amount_paid: bill.amount_paid?.toString() || '0',
     })
+    setShowAddChargeMenu(false)
+    await loadUtilityLineItemsForBill(bill)
     setShowEditBillModal(true)
   }
 
   const handleCreateBill = () => {
     setSelectedUnitForBill('')
-    
-    // Auto-fill utility amounts from active recurring utility types when modal opens
-    const { garbageAmount, maintenanceAmount, otherUtilitiesAmount } = computeUtilityAmounts(
-      activeUtilityTypes || []
-    )
-    
-    // Get settings to initialize rate fields
+    setShowAddChargeMenu(false)
+    resetUtilityLineItemsFromActive()
+
     const storedSettings = localStorage.getItem('app-settings')
     const parsedSettings = storedSettings ? JSON.parse(storedSettings) : null
-    
+
     setBillFormData({
       water_prev_reading: '',
       water_current_reading: '',
@@ -1050,12 +1242,34 @@ export default function Billing() {
       elec_rate: parsedSettings?.elec_rate?.toString() || '',
       rent_amount: '',
       arrears_brought_forward: '',
-      garbage_amount: garbageAmount.toString(),
-      maintenance_amount: maintenanceAmount.toString(),
-      other_utilities_amount: otherUtilitiesAmount.toString(),
+      garbage_amount: '0',
+      maintenance_amount: '0',
+      other_utilities_amount: '0',
       amount_paid: '0',
     })
     setShowCreateBillModal(true)
+  }
+
+  const openCreateUtilityBillModal = () => {
+    setSelectedUnitForBill('')
+    setShowAddChargeMenu(false)
+    resetUtilityLineItemsFromActive()
+    setBillFormData({
+      water_prev_reading: '0',
+      water_current_reading: '0',
+      water_rate: '50',
+      elec_prev_reading: '0',
+      elec_current_reading: '0',
+      elec_rate: '15',
+      rent_amount: '0',
+      arrears_brought_forward: '0',
+      garbage_amount: '0',
+      maintenance_amount: '0',
+      other_utilities_amount: '0',
+      amount_paid: '0',
+    })
+    setError(null)
+    setShowCreateUtilityBillModal(true)
   }
 
   const handleSaveEditBill = async (e: React.FormEvent) => {
@@ -1078,9 +1292,7 @@ export default function Billing() {
       const elecAmount = Math.round(elecUnits * elecRate * 100) / 100
       const rentAmount = Math.round(parseFloat(billFormData.rent_amount) * 100 || 0) / 100
       const arrears = Math.round(parseFloat(billFormData.arrears_brought_forward) * 100 || 0) / 100
-      const garbageAmount = Math.round(parseFloat(billFormData.garbage_amount) * 100 || 0) / 100
-      const maintenanceAmount = Math.round(parseFloat(billFormData.maintenance_amount) * 100 || 0) / 100
-      const otherUtilitiesAmount = Math.round(parseFloat(billFormData.other_utilities_amount) * 100 || 0) / 100
+      const { garbageAmount, maintenanceAmount, otherUtilitiesAmount } = deriveBillUtilityColumns(utilityLineItems)
       const totalAmount = waterAmount + elecAmount + rentAmount + arrears + garbageAmount + maintenanceAmount + otherUtilitiesAmount
     const newBalance = totalAmount - amountPaid
     const newStatus = newBalance <= 0 ? 'paid' : amountPaid > 0 ? 'partial' : 'pending'
@@ -1102,7 +1314,7 @@ export default function Billing() {
       status: newStatus,
     }
 
-    updateBillMutation.mutate({ id: editingBill.id, updates })
+    updateBillMutation.mutate({ id: editingBill.id, updates, lineItems: utilityLineItems })
   }
 
   const handleSaveCreateBill = async (e: React.FormEvent) => {
@@ -1120,22 +1332,8 @@ export default function Billing() {
       return
     }
 
-    // Calculate utility amounts from active utility types ONLY
-    // Use the values from the form (which were auto-filled from active utilities)
-    // This ensures we only use active utilities and their exact rates
-    let garbageAmount = parseFloat(billFormData.garbage_amount) || 0
-    let maintenanceAmount = parseFloat(billFormData.maintenance_amount) || 0
-    let otherUtilitiesAmount = parseFloat(billFormData.other_utilities_amount) || 0
-    
-    // If form values are 0, derive from active recurring utility types (fallback)
-    if (garbageAmount === 0 && maintenanceAmount === 0 && otherUtilitiesAmount === 0) {
-      const computed = computeUtilityAmounts(activeUtilityTypes || [])
-      garbageAmount = computed.garbageAmount
-      maintenanceAmount = computed.maintenanceAmount
-      otherUtilitiesAmount = computed.otherUtilitiesAmount
-    }
+    const { garbageAmount, maintenanceAmount, otherUtilitiesAmount } = deriveBillUtilityColumns(utilityLineItems)
 
-    // Fetch settings directly to ensure we have the latest values
     const storedSettings = localStorage.getItem('app-settings')
     const parsedSettings = storedSettings ? JSON.parse(storedSettings) : null
     
@@ -1172,23 +1370,15 @@ export default function Billing() {
       return
     }
 
-    // Ensure status is synced using DB-calculated values (in case generated columns change status)
     try {
-      if (insertedBill?.id) await syncBillStatus(insertedBill.id)
-    } catch (err) {
-      console.warn('Failed to sync status for newly created bill:', err)
-    }
-
-    // Create utility_bill_items for recurring charges (excludes water/electricity)
-    if (insertedBill && activeUtilityTypes && activeUtilityTypes.length > 0) {
-      try {
-        await syncUtilityBillItemsForBill(insertedBill.id, activeUtilityTypes)
-      } catch (utilityItemsError) {
-        console.error('Failed to create utility bill items:', utilityItemsError)
+      if (insertedBill?.id) {
+        await syncUtilityBillItemsFromLineItems(insertedBill.id, utilityLineItems)
+        await syncBillStatus(insertedBill.id)
       }
+    } catch (err) {
+      console.warn('Failed to sync utility bill items for new bill:', err)
     }
 
-    // Success - invalidate queries
     await queryClient.invalidateQueries({ queryKey: ['bills'] })
     await queryClient.invalidateQueries({ queryKey: ['arrears-report'] })
     await queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
@@ -1196,6 +1386,8 @@ export default function Billing() {
     await queryClient.refetchQueries({ queryKey: ['dashboard-stats'] })
     setShowCreateBillModal(false)
     setSelectedUnitForBill('')
+    setUtilityLineItems([])
+    setShowAddChargeMenu(false)
     setError(null)
     setBillFormData({
       water_prev_reading: '',
@@ -1228,12 +1420,10 @@ export default function Billing() {
       return
     }
 
-    const garbageAmount = parseFloat(billFormData.garbage_amount) || 0
-    const maintenanceAmount = parseFloat(billFormData.maintenance_amount) || 0
-    const otherUtilitiesAmount = parseFloat(billFormData.other_utilities_amount) || 0
+    const { garbageAmount, maintenanceAmount, otherUtilitiesAmount } = deriveBillUtilityColumns(utilityLineItems)
 
-    if (garbageAmount === 0 && maintenanceAmount === 0 && otherUtilitiesAmount === 0) {
-      setError('Please enter at least one utility amount')
+    if (utilityChargesSubtotal <= 0) {
+      setError('Please enter at least one charge amount')
       return
     }
 
@@ -1273,7 +1463,7 @@ export default function Billing() {
       status: 'pending' as const,
     }
 
-    createUtilityBillMutation.mutate(billData)
+    createUtilityBillMutation.mutate({ billData, lineItems: utilityLineItems })
   }
 
   const handlePrintBill = async (bill: any) => {
@@ -1412,25 +1602,7 @@ export default function Billing() {
             New Bill
           </button>
           <button
-            onClick={() => {
-              setSelectedUnitForBill('')
-              setBillFormData({
-                water_prev_reading: '0',
-                water_current_reading: '0',
-                water_rate: '50',
-                elec_prev_reading: '0',
-                elec_current_reading: '0',
-                elec_rate: '15',
-                rent_amount: '0',
-                arrears_brought_forward: '0',
-                garbage_amount: '',
-                maintenance_amount: '',
-                other_utilities_amount: '',
-                amount_paid: '0',
-              })
-              setError(null)
-              setShowCreateUtilityBillModal(true)
-            }}
+            onClick={openCreateUtilityBillModal}
             className="btn btn-secondary"
             title="Create a utility-only bill (garbage, cleaning, maintenance, etc.)"
           >
@@ -2121,48 +2293,11 @@ export default function Billing() {
                       required
                     />
                   </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Garbage Collection (KES)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={billFormData.garbage_amount}
-                      onChange={(e) => setBillFormData({ ...billFormData, garbage_amount: e.target.value })}
-                      className="input"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Maintenance (KES)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={billFormData.maintenance_amount}
-                      onChange={(e) => setBillFormData({ ...billFormData, maintenance_amount: e.target.value })}
-                      className="input"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Other Utilities (KES)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={billFormData.other_utilities_amount}
-                      onChange={(e) => setBillFormData({ ...billFormData, other_utilities_amount: e.target.value })}
-                      className="input"
-                      required
-                    />
-                    <p className="text-xs text-slate-500 mt-1">
-                      For additional utilities like parking, security, etc.
-                    </p>
-                  </div>
+                </div>
+
+                {renderAdditionalChargesSection()}
+
+                <div className="grid grid-cols-1 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-slate-700 mb-2">
                       Amount Paid (KES)
@@ -2187,6 +2322,8 @@ export default function Billing() {
                     onClick={() => {
                       setShowEditBillModal(false)
                       setEditingBill(null)
+                      setUtilityLineItems([])
+                      setShowAddChargeMenu(false)
                       setError(null)
                     }}
                     className="flex-1 btn btn-secondary"
@@ -2222,6 +2359,8 @@ export default function Billing() {
         <div className="modal-overlay" onClick={() => {
           setShowCreateUtilityBillModal(false)
           setSelectedUnitForBill('')
+          setUtilityLineItems([])
+          setShowAddChargeMenu(false)
           setError(null)
         }}>
           <div className="modal-content max-w-2xl" onClick={(e) => e.stopPropagation()}>
@@ -2287,52 +2426,7 @@ export default function Billing() {
                   </select>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Garbage Amount
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={billFormData.garbage_amount}
-                      onChange={(e) => setBillFormData(prev => ({ ...prev, garbage_amount: e.target.value }))}
-                      placeholder="0.00"
-                      className="input"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Maintenance Amount
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={billFormData.maintenance_amount}
-                      onChange={(e) => setBillFormData(prev => ({ ...prev, maintenance_amount: e.target.value }))}
-                      placeholder="0.00"
-                      className="input"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Other Utilities Amount
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={billFormData.other_utilities_amount}
-                      onChange={(e) => setBillFormData(prev => ({ ...prev, other_utilities_amount: e.target.value }))}
-                      placeholder="0.00"
-                      className="input"
-                    />
-                  </div>
-                </div>
+                {renderAdditionalChargesSection()}
 
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -2357,6 +2451,8 @@ export default function Billing() {
                     onClick={() => {
                       setShowCreateUtilityBillModal(false)
                       setSelectedUnitForBill('')
+                      setUtilityLineItems([])
+                      setShowAddChargeMenu(false)
                       setError(null)
                     }}
                     className="flex-1 btn btn-secondary"
@@ -2457,13 +2553,8 @@ export default function Billing() {
                         // Preserve negative balances (overpayment) as negative arrears when present
                         newFormData.arrears_brought_forward = computedArrears.toString()
 
-                        // Auto-fill recurring utility amounts (excludes water/electricity meter utilities)
-                        const computedUtilities = computeUtilityAmounts(activeUtilityTypes || [])
-                        newFormData.garbage_amount = computedUtilities.garbageAmount.toString()
-                        newFormData.maintenance_amount = computedUtilities.maintenanceAmount.toString()
-                        newFormData.other_utilities_amount = computedUtilities.otherUtilitiesAmount.toString()
-
                         setBillFormData(newFormData)
+                        setUtilityLineItems(lineItemsFromUtilityTypes(activeUtilityTypes || []))
                       }
                     }}
                     className="input"
@@ -2603,47 +2694,7 @@ export default function Billing() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-200 mb-2">
-                      Garbage (KES) <span className="text-xs text-slate-500 dark:text-zinc-400 font-normal">(Auto-filled)</span>
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={billFormData.garbage_amount}
-                      onChange={(e) => setBillFormData({ ...billFormData, garbage_amount: e.target.value })}
-                      className="input"
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-200 mb-2">
-                      Maintenance (KES) <span className="text-xs text-slate-500 dark:text-zinc-400 font-normal">(Auto-filled)</span>
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={billFormData.maintenance_amount}
-                      onChange={(e) => setBillFormData({ ...billFormData, maintenance_amount: e.target.value })}
-                      className="input"
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-zinc-200 mb-2">
-                      Other Utilities (KES) <span className="text-xs text-slate-500 dark:text-zinc-400 font-normal">(Auto-filled)</span>
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={billFormData.other_utilities_amount}
-                      onChange={(e) => setBillFormData({ ...billFormData, other_utilities_amount: e.target.value })}
-                      className="input"
-                      placeholder="0.00"
-                    />
-                  </div>
-                </div>
+                {renderAdditionalChargesSection()}
 
                 <div className="flex gap-3 pt-4 border-t border-slate-200 dark:border-zinc-800">
                   <button
@@ -2651,6 +2702,8 @@ export default function Billing() {
                     onClick={() => {
                       setShowCreateBillModal(false)
                       setSelectedUnitForBill('')
+                      setUtilityLineItems([])
+                      setShowAddChargeMenu(false)
                       setError(null)
                     }}
                     className="flex-1 btn btn-secondary"
