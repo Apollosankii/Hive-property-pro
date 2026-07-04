@@ -22,7 +22,11 @@ import {
   utilityLineItemsSubtotal,
   type BillUtilityLineItem,
 } from '@/lib/recurring-utilities'
-import { reconcileAdvanceCreditsForBill, syncBillStatus as syncBillStatusShared } from '@/lib/advance-payments'
+import {
+  reconcileAdvanceCreditsForBill,
+  reconcileAdvanceCreditsForBills,
+  syncBillStatus as syncBillStatusShared,
+} from '@/lib/advance-payments'
 import ExportColumnsModal from '@/components/ExportColumnsModal'
 import useToast from '@/hooks/useToast'
 import { useAuthStore } from '@/store/authStore'
@@ -286,10 +290,30 @@ export default function Billing() {
       }
       
       console.log('Bills fetched:', billsData.length, 'bills')
+
+      // Apply pending advance payments to existing bills (and repair legacy applications)
+      let billsToShow = billsData
+      try {
+        const creditApplied = await reconcileAdvanceCreditsForBills(billsData)
+        if (creditApplied > 0) {
+          console.log('Applied advance credits to existing bills:', creditApplied)
+          const { data: refreshed, error: refreshErr } = await supabase
+            .from('bills')
+            .select('*')
+            .gte('billing_month', monthStart)
+            .lt('billing_month', monthEnd)
+            .order('created_at', { ascending: false })
+          if (!refreshErr && refreshed) {
+            billsToShow = refreshed
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to reconcile advance payments for loaded bills:', err)
+      }
       
       // Fetch units and tenants separately
       const billsWithRelations = await Promise.all(
-        billsData.map(async (bill: any) => {
+        billsToShow.map(async (bill: any) => {
           const [unitRes, tenantRes] = await Promise.all([
             bill.unit_id
               ? supabase

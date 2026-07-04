@@ -3,12 +3,13 @@ import { supabase } from './supabase'
 /** Normalize billing month to YYYY-MM-01 for advance_payments.target_month matching. */
 export function normalizeBillingMonth(billingMonth: string): string {
   if (!billingMonth) return billingMonth
+  // Prefer string parse to avoid timezone shifting the month
+  const match = String(billingMonth).match(/^(\d{4})-(\d{2})/)
+  if (match) return `${match[1]}-${match[2]}-01`
   const d = new Date(billingMonth)
   if (!Number.isNaN(d.getTime())) {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01`
   }
-  const match = billingMonth.match(/^(\d{4})-(\d{2})/)
-  if (match) return `${match[1]}-${match[2]}-01`
   return billingMonth
 }
 
@@ -163,4 +164,124 @@ export async function reconcileAdvanceCreditsForBill(
   const applied = await applyUnappliedAdvanceCreditsToBill(billId, unitId, billingMonth)
   const repaired = await repairLinkedAdvancesOnBill(billId)
   return applied + repaired
+}
+
+/**
+ * Reconcile advance credits for a list of existing bills (e.g. when Billing loads).
+ * Only touches bills that have pending or linked advance payments.
+ * Returns total credit amount applied/repaired.
+ */
+export async function reconcileAdvanceCreditsForBills(
+  bills: Array<{ id: string; unit_id: string; billing_month: string }>
+): Promise<number> {
+  if (!bills.length) return 0
+
+  const unitIds = [...new Set(bills.map((b) => b.unit_id).filter(Boolean))]
+  const billIds = bills.map((b) => b.id).filter(Boolean)
+  if (unitIds.length === 0 || billIds.length === 0) return 0
+
+  const [{ data: pending, error: pendingErr }, { data: linked, error: linkedErr }] =
+    await Promise.all([
+      supabase
+        .from('advance_payments')
+        .select('id, unit_id, target_month, amount')
+        .in('unit_id', unitIds)
+        .is('applied_bill_id', null),
+      supabase
+        .from('advance_payments')
+        .select('id, amount, applied_bill_id')
+        .in('applied_bill_id', billIds),
+    ])
+
+  if (pendingErr) throw pendingErr
+  if (linkedErr) throw linkedErr
+
+  const needsWork = new Set<string>()
+
+  for (const row of pending || []) {
+    const month = normalizeBillingMonth(row.target_month)
+    const bill = bills.find(
+      (b) =>
+        b.unit_id === row.unit_id &&
+        normalizeBillingMonth(b.billing_month) === month
+    )
+    if (bill?.id) needsWork.add(bill.id)
+  }
+
+  for (const row of linked || []) {
+    if (row.applied_bill_id) needsWork.add(row.applied_bill_id)
+  }
+
+  if (needsWork.size === 0) return 0
+
+  let total = 0
+  for (const bill of bills) {
+    if (!needsWork.has(bill.id)) continue
+    try {
+      total += await reconcileAdvanceCreditsForBill(
+        bill.id,
+        bill.unit_id,
+        bill.billing_month
+      )
+    } catch (err) {
+      console.warn('Failed to reconcile advance credits for bill', bill.id, err)
+    }
+  }
+
+  return total
+}
+
+/**
+ * Apply every unapplied advance payment that has a matching bill, and repair
+ * linked advances that never updated amount_paid. Use when opening Payments.
+ */
+export async function reconcileAllPendingAdvanceCredits(): Promise<number> {
+  const { data: pending, error } = await supabase
+    .from('advance_payments')
+    .select('id, unit_id, target_month')
+    .is('applied_bill_id', null)
+
+  if (error) throw error
+
+  let total = 0
+  const seenBills = new Set<string>()
+
+  for (const adv of pending || []) {
+    const month = normalizeBillingMonth(adv.target_month)
+    const { data: bill } = await supabase
+      .from('bills')
+      .select('id')
+      .eq('unit_id', adv.unit_id)
+      .eq('billing_month', month)
+      .maybeSingle()
+
+    if (!bill?.id || seenBills.has(bill.id)) continue
+    seenBills.add(bill.id)
+
+    try {
+      total += await reconcileAdvanceCreditsForBill(bill.id, adv.unit_id, month)
+    } catch (err) {
+      console.warn('Failed to reconcile pending advance for unit', adv.unit_id, err)
+    }
+  }
+
+  const { data: linked, error: linkedErr } = await supabase
+    .from('advance_payments')
+    .select('applied_bill_id')
+    .not('applied_bill_id', 'is', null)
+
+  if (linkedErr) throw linkedErr
+
+  for (const row of linked || []) {
+    const billId = row.applied_bill_id
+    if (!billId || seenBills.has(billId)) continue
+    seenBills.add(billId)
+    try {
+      total += await repairLinkedAdvancesOnBill(billId)
+    } catch (err) {
+      console.warn('Failed to repair linked advances for bill', billId, err)
+    }
+  }
+
+  return total
 }

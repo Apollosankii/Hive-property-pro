@@ -7,7 +7,10 @@ import { Plus, Download, DollarSign, CheckCircle } from 'lucide-react'
 import { generateReceiptPDF } from '@/lib/pdf'
 import { compareByBuildingThenUnit } from '@/lib/property-sort'
 import { fetchBuildingPaymentByUnitId, readGlobalPaymentSettings, resolvePaymentInstructions, buildingHasPaymentOverride } from '@/lib/payment-instructions'
-import { applyUnappliedAdvanceCreditsToBill } from '@/lib/advance-payments'
+import {
+  applyUnappliedAdvanceCreditsToBill,
+  reconcileAllPendingAdvanceCredits,
+} from '@/lib/advance-payments'
 
 function billingMonthKey(billingMonth: string): string {
   const d = new Date(billingMonth)
@@ -389,6 +392,16 @@ export default function Payments() {
   const { data: advancePayments, error: advancePaymentsError, isLoading: advancePaymentsLoading } = useQuery({
     queryKey: ['advance-payments'],
     queryFn: async () => {
+      // Apply any pending advance credits to existing bills before listing
+      try {
+        const applied = await reconcileAllPendingAdvanceCredits()
+        if (applied > 0) {
+          console.log('Reconciled advance credits on load:', applied)
+        }
+      } catch (err) {
+        console.warn('Failed to reconcile pending advance credits:', err)
+      }
+
       const { data: paymentsData, error: paymentsError } = await supabase
         .from('advance_payments')
         .select('*')
