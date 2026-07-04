@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, Tenant } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/utils'
+import { computeCurrentBalance } from '@/lib/tenant-balance'
 import { importTenantsFromFile } from '@/lib/excel-import'
 import { Plus, Edit, User, Search, AlertCircle, X, Upload, FileSpreadsheet, Trash2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -141,7 +142,7 @@ export default function Tenants() {
               : Promise.resolve({ data: null, error: null }),
             supabase
               .from('bills')
-              .select('balance')
+              .select('id, unit_id, billing_month, balance, total_amount, amount_paid, arrears_brought_forward, status')
               .eq('tenant_id', tenant.id),
             tenant.created_by_user_id ? getCaretakerName(tenant.created_by_user_id) : Promise.resolve(null),
             tenant.modified_by_user_id ? getCaretakerName(tenant.modified_by_user_id) : Promise.resolve(null)
@@ -628,7 +629,8 @@ export default function Tenants() {
                 {filteredTenants.map((tenant: any) => {
                   // Handle bills - it might be an array or object
                   const billsArray = Array.isArray(tenant.bills) ? tenant.bills : (tenant.bills ? [tenant.bills] : [])
-                  const totalBalance = billsArray.reduce((sum: number, b: any) => sum + (b.balance || 0), 0)
+                  // Latest bill per unit only — summing all balances double-counts carried arrears
+                  const totalBalance = computeCurrentBalance(billsArray)
                   return (
                     <tr key={tenant.id}>
                       <td data-label="Photo">

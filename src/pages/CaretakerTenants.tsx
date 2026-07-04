@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, Tenant } from '@/lib/supabase'
 import { formatCurrency } from '@/lib/utils'
+import { computeCurrentBalance } from '@/lib/tenant-balance'
 import { Plus, Users, AlertCircle, CheckCircle, Edit, Search, User } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
@@ -122,7 +123,7 @@ export default function CaretakerTenants() {
               : Promise.resolve({ data: null, error: null }),
             supabase
               .from('bills')
-              .select('balance')
+              .select('id, unit_id, billing_month, balance, total_amount, amount_paid, arrears_brought_forward, status')
               .eq('tenant_id', tenant.id)
           ])
           
@@ -448,7 +449,7 @@ export default function CaretakerTenants() {
               <tbody>
                 {filteredTenants.map((tenant: any) => {
                   const billsArray = Array.isArray(tenant.bills) ? tenant.bills : (tenant.bills ? [tenant.bills] : [])
-                  const totalBalance = billsArray.reduce((sum: number, b: any) => sum + (b.balance || 0), 0)
+                  const totalBalance = computeCurrentBalance(billsArray)
                   return (
                     <tr key={tenant.id}>
                       <td>

@@ -13,6 +13,7 @@ import {
   reconcileAllPendingAdvanceCredits,
   syncBillStatus,
 } from '@/lib/advance-payments'
+import { computeTenantAccountSummary } from '@/lib/tenant-balance'
 
 function billingMonthKey(billingMonth: string): string {
   const d = new Date(billingMonth)
@@ -326,6 +327,10 @@ export default function Payments() {
     await queryClient.invalidateQueries({ queryKey: ['bills'] })
     await queryClient.invalidateQueries({ queryKey: ['bills-for-month-units'] })
     await queryClient.invalidateQueries({ queryKey: ['payments-by-entity'] })
+    await queryClient.invalidateQueries({ queryKey: ['entity-account-summary'] })
+    await queryClient.invalidateQueries({ queryKey: ['tenant-bills'] })
+    await queryClient.invalidateQueries({ queryKey: ['tenant-payments'] })
+    await queryClient.invalidateQueries({ queryKey: ['tenant-pending-advances'] })
     await queryClient.invalidateQueries({ queryKey: ['arrears-report'] })
     await queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
     await Promise.all([
@@ -750,6 +755,48 @@ export default function Payments() {
       )
 
       return withRelations
+    },
+  })
+
+  const { data: entityAccountSummary } = useQuery({
+    queryKey: ['entity-account-summary', filterType, selectedEntityId],
+    enabled: !!selectedEntityId,
+    queryFn: async () => {
+      const field = filterType === 'unit' ? 'unit_id' : 'tenant_id'
+
+      const [billsRes, paymentsRes, advancesRes] = await Promise.all([
+        supabase
+          .from('bills')
+          .select('id, unit_id, billing_month, balance, total_amount, amount_paid, arrears_brought_forward, status')
+          .eq(field, selectedEntityId),
+        supabase.from('payments').select('amount').eq(field, selectedEntityId),
+        filterType === 'tenant'
+          ? supabase
+              .from('advance_payments')
+              .select('amount')
+              .eq('tenant_id', selectedEntityId)
+              .is('applied_bill_id', null)
+          : supabase
+              .from('advance_payments')
+              .select('amount')
+              .eq('unit_id', selectedEntityId)
+              .is('applied_bill_id', null),
+      ])
+
+      if (billsRes.error) throw billsRes.error
+      if (paymentsRes.error) throw paymentsRes.error
+      if (advancesRes.error) throw advancesRes.error
+
+      const pendingAdvanceCredit = (advancesRes.data || []).reduce(
+        (sum, row) => sum + (Number(row.amount) || 0),
+        0
+      )
+
+      return computeTenantAccountSummary(
+        billsRes.data || [],
+        paymentsRes.data || [],
+        pendingAdvanceCredit
+      )
     },
   })
 
@@ -1401,19 +1448,59 @@ export default function Payments() {
             </div>
           </div>
         </div>
-        {selectedEntityId && paymentsByEntity && (
-          <div className="p-3 grid grid-cols-3 gap-3">
+        {selectedEntityId && (
+          <div className="p-3 grid grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="p-3 bg-slate-50 rounded-xl">
-              <div className="text-sm text-slate-600">Total Paid</div>
-              <div className="font-bold text-slate-900">{formatCurrency(paymentsSummary.total || 0)}</div>
+              <div className="text-sm text-slate-600">
+                {entityAccountSummary && entityAccountSummary.currentBalance > 0.001
+                  ? 'Amount Owed'
+                  : entityAccountSummary && entityAccountSummary.currentBalance < -0.001
+                    ? 'Credit Balance'
+                    : 'Current Balance'}
+              </div>
+              <div
+                className={`font-bold ${
+                  entityAccountSummary && entityAccountSummary.currentBalance > 0.001
+                    ? 'text-red-600'
+                    : entityAccountSummary && entityAccountSummary.currentBalance < -0.001
+                      ? 'text-green-600'
+                      : 'text-slate-900'
+                }`}
+              >
+                {formatCurrency(
+                  entityAccountSummary
+                    ? entityAccountSummary.currentBalance > 0.001
+                      ? entityAccountSummary.amountOwed
+                      : entityAccountSummary.currentBalance < -0.001
+                        ? entityAccountSummary.creditBalance
+                        : 0
+                    : 0
+                )}
+              </div>
+              {entityAccountSummary && entityAccountSummary.pendingAdvanceCredit > 0 && (
+                <div className="text-xs text-emerald-700 mt-1">
+                  Pending advance: {formatCurrency(entityAccountSummary.pendingAdvanceCredit)}
+                </div>
+              )}
             </div>
             <div className="p-3 bg-slate-50 rounded-xl">
-              <div className="text-sm text-slate-600">Payments</div>
+              <div className="text-sm text-slate-600">Paid this month</div>
+              <div className="font-bold text-green-600">{formatCurrency(paymentsSummary.total || 0)}</div>
+            </div>
+            <div className="p-3 bg-slate-50 rounded-xl">
+              <div className="text-sm text-slate-600">Payments this month</div>
               <div className="font-bold text-slate-900">{paymentsSummary.count || 0}</div>
             </div>
             <div className="p-3 bg-slate-50 rounded-xl">
-              <div className="text-sm text-slate-600">Last Payment</div>
-              <div className="font-bold text-slate-900">{paymentsSummary.last ? formatDate(paymentsSummary.last) : 'N/A'}</div>
+              <div className="text-sm text-slate-600">Last payment</div>
+              <div className="font-bold text-slate-900">
+                {paymentsSummary.last ? formatDate(paymentsSummary.last) : 'N/A'}
+              </div>
+              {entityAccountSummary && (
+                <div className="text-xs text-slate-500 mt-1">
+                  Lifetime paid: {formatCurrency(entityAccountSummary.totalPaid)}
+                </div>
+              )}
             </div>
           </div>
         )}

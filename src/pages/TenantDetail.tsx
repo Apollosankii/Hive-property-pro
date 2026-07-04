@@ -3,7 +3,8 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate, formatMonth } from '@/lib/utils'
-import { ArrowLeft, User, Phone, Mail, Home, Receipt, CreditCard, Calendar, AlertCircle, X } from 'lucide-react'
+import { computeTenantAccountSummary } from '@/lib/tenant-balance'
+import { ArrowLeft, User, Phone, Mail, Home, CreditCard, Calendar, AlertCircle, X } from 'lucide-react'
 import useToast from '@/hooks/useToast'
 
 export default function TenantDetail() {
@@ -162,6 +163,21 @@ export default function TenantDetail() {
     enabled: !!id,
   })
 
+  const { data: pendingAdvanceCredit = 0 } = useQuery({
+    queryKey: ['tenant-pending-advances', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('advance_payments')
+        .select('amount')
+        .eq('tenant_id', id)
+        .is('applied_bill_id', null)
+
+      if (error) throw error
+      return (data || []).reduce((sum, row) => sum + (Number(row.amount) || 0), 0)
+    },
+    enabled: !!id,
+  })
+
   const { data: settlements } = useQuery({
     queryKey: ['tenant-settlements', id],
     queryFn: async () => {
@@ -239,8 +255,10 @@ export default function TenantDetail() {
     )
   }
 
-  const totalBalance = bills?.reduce((sum, b) => sum + (b.balance || 0), 0) || 0
-  const totalPaid = payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0
+  const accountSummary = useMemo(
+    () => computeTenantAccountSummary(bills || [], payments || [], pendingAdvanceCredit),
+    [bills, payments, pendingAdvanceCredit]
+  )
 
   return (
     <div className="space-y-6">
@@ -321,39 +339,80 @@ export default function TenantDetail() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="card">
-          <div className="flex items-center gap-3 mb-2">
-            <CreditCard className="text-primary-600" size={24} />
-            <h3 className="font-semibold">Current Balance</h3>
+      <div className="card">
+        <div className="flex items-center gap-3 mb-4">
+          <CreditCard className="text-primary-600" size={24} />
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">Payment Summary</h2>
+            <p className="text-sm text-slate-500">
+              Current position uses the latest bill only (arrears are already carried forward).
+              {accountSummary.latestBillingMonth
+                ? ` Latest billing month: ${formatMonth(accountSummary.latestBillingMonth)}.`
+                : ' No bills yet.'}
+            </p>
           </div>
-          <p
-            className={`text-3xl font-bold ${
-              totalBalance > 0 ? 'text-red-600' : 'text-green-600'
-            }`}
-          >
-            {formatCurrency(totalBalance)}
-          </p>
         </div>
 
-        <div className="card">
-          <div className="flex items-center gap-3 mb-2">
-            <Receipt className="text-green-600" size={24} />
-            <h3 className="font-semibold">Total Paid</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="p-4 rounded-xl border border-slate-200 bg-slate-50">
+            <p className="text-sm text-slate-600 mb-1">
+              {accountSummary.currentBalance > 0.001
+                ? 'Amount Owed'
+                : accountSummary.currentBalance < -0.001
+                  ? 'Credit Balance'
+                  : 'Current Balance'}
+            </p>
+            <p
+              className={`text-2xl font-bold ${
+                accountSummary.currentBalance > 0.001
+                  ? 'text-red-600'
+                  : accountSummary.currentBalance < -0.001
+                    ? 'text-green-600'
+                    : 'text-slate-900'
+              }`}
+            >
+              {formatCurrency(
+                accountSummary.currentBalance > 0.001
+                  ? accountSummary.amountOwed
+                  : accountSummary.currentBalance < -0.001
+                    ? accountSummary.creditBalance
+                    : 0
+              )}
+            </p>
+            {accountSummary.pendingAdvanceCredit > 0 && (
+              <p className="text-xs text-emerald-700 mt-1">
+                Includes {formatCurrency(accountSummary.pendingAdvanceCredit)} pending advance credit
+              </p>
+            )}
           </div>
-          <p className="text-3xl font-bold text-green-600">
-            {formatCurrency(totalPaid)}
-          </p>
-        </div>
 
-        <div className="card">
-          <div className="flex items-center gap-3 mb-2">
-            <Home className="text-blue-600" size={24} />
-            <h3 className="font-semibold">Monthly Rent</h3>
+          <div className="p-4 rounded-xl border border-slate-200 bg-slate-50">
+            <p className="text-sm text-slate-600 mb-1">Latest Bill Charges</p>
+            <p className="text-2xl font-bold text-slate-900">
+              {formatCurrency(accountSummary.latestCharges)}
+            </p>
+            <p className="text-xs text-slate-500 mt-1">Excludes carried arrears</p>
           </div>
-          <p className="text-3xl font-bold">
-            {formatCurrency(tenantUnit?.monthly_rent || 0)}
-          </p>
+
+          <div className="p-4 rounded-xl border border-slate-200 bg-slate-50">
+            <p className="text-sm text-slate-600 mb-1">Paid on Latest Bill</p>
+            <p className="text-2xl font-bold text-green-600">
+              {formatCurrency(accountSummary.latestPaid)}
+            </p>
+            <p className="text-xs text-slate-500 mt-1">
+              Outstanding on bill: {formatCurrency(accountSummary.outstandingOnBills)}
+            </p>
+          </div>
+
+          <div className="p-4 rounded-xl border border-slate-200 bg-slate-50">
+            <p className="text-sm text-slate-600 mb-1">Lifetime Payments</p>
+            <p className="text-2xl font-bold text-green-600">
+              {formatCurrency(accountSummary.totalPaid)}
+            </p>
+            <p className="text-xs text-slate-500 mt-1">
+              Monthly rent: {formatCurrency(tenantUnit?.monthly_rent || 0)}
+            </p>
+          </div>
         </div>
       </div>
 
