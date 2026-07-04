@@ -3,13 +3,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Download, DollarSign, CheckCircle } from 'lucide-react'
+import { Plus, Download, DollarSign, CheckCircle, Edit, Trash2, X } from 'lucide-react'
 import { generateReceiptPDF } from '@/lib/pdf'
 import { compareByBuildingThenUnit } from '@/lib/property-sort'
 import { fetchBuildingPaymentByUnitId, readGlobalPaymentSettings, resolvePaymentInstructions, buildingHasPaymentOverride } from '@/lib/payment-instructions'
 import {
   applyUnappliedAdvanceCreditsToBill,
+  normalizeBillingMonth,
   reconcileAllPendingAdvanceCredits,
+  syncBillStatus,
 } from '@/lib/advance-payments'
 
 function billingMonthKey(billingMonth: string): string {
@@ -148,6 +150,139 @@ async function recordAdvancePayment(params: {
   return advancePayment
 }
 
+async function adjustBillPaidAmount(billId: string, delta: number) {
+  if (!billId || Math.abs(delta) < 0.0001) return
+
+  const { data: bill, error } = await supabase
+    .from('bills')
+    .select('amount_paid')
+    .eq('id', billId)
+    .single()
+
+  if (error || !bill) throw error || new Error('Bill not found')
+
+  const newPaid = Math.round(Math.max(0, (Number(bill.amount_paid) || 0) + delta) * 100) / 100
+  const { error: updateErr } = await supabase
+    .from('bills')
+    .update({ amount_paid: newPaid })
+    .eq('id', billId)
+
+  if (updateErr) throw updateErr
+  await syncBillStatus(billId)
+}
+
+function toDateInputValue(value?: string | null) {
+  if (!value) return new Date().toISOString().slice(0, 10)
+  const match = String(value).match(/^(\d{4}-\d{2}-\d{2})/)
+  if (match) return match[1]
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10)
+  return d.toISOString().slice(0, 10)
+}
+
+async function updateRegularPayment(params: {
+  paymentId: string
+  billId: string
+  oldAmount: number
+  amount: number
+  paymentMethod: 'cash' | 'mpesa' | 'bank'
+  paymentDate: string
+  notes?: string
+}) {
+  const { error } = await supabase
+    .from('payments')
+    .update({
+      amount: params.amount,
+      payment_method: params.paymentMethod,
+      payment_date: params.paymentDate,
+      notes: params.notes || null,
+    })
+    .eq('id', params.paymentId)
+
+  if (error) throw error
+
+  const delta = params.amount - params.oldAmount
+  await adjustBillPaidAmount(params.billId, delta)
+}
+
+async function deleteRegularPayment(params: {
+  paymentId: string
+  billId: string
+  amount: number
+}) {
+  const { error } = await supabase.from('payments').delete().eq('id', params.paymentId)
+  if (error) throw error
+  await adjustBillPaidAmount(params.billId, -params.amount)
+}
+
+async function updateAdvancePaymentRecord(params: {
+  paymentId: string
+  oldAmount: number
+  oldTargetMonth: string
+  appliedBillId?: string | null
+  unitId: string
+  amount: number
+  paymentMethod: 'cash' | 'mpesa' | 'bank'
+  paymentDate: string
+  notes?: string
+  targetMonth: string
+}) {
+  const newTarget = normalizeBillingMonth(params.targetMonth)
+  const oldTarget = normalizeBillingMonth(params.oldTargetMonth)
+  const targetChanged = newTarget !== oldTarget
+  let appliedBillId = params.appliedBillId || null
+
+  // If applied and target month changes, reverse credit from the old bill first
+  if (appliedBillId && targetChanged) {
+    await adjustBillPaidAmount(appliedBillId, -params.oldAmount)
+    appliedBillId = null
+  } else if (appliedBillId && params.amount !== params.oldAmount) {
+    await adjustBillPaidAmount(appliedBillId, params.amount - params.oldAmount)
+  }
+
+  const { error } = await supabase
+    .from('advance_payments')
+    .update({
+      amount: params.amount,
+      payment_method: params.paymentMethod,
+      payment_date: params.paymentDate,
+      notes: params.notes || null,
+      target_month: newTarget,
+      applied_bill_id: appliedBillId,
+      applied_at: appliedBillId ? new Date().toISOString() : null,
+    })
+    .eq('id', params.paymentId)
+
+  if (error) throw error
+
+  // Re-apply to bill for the (possibly new) target month
+  if (!appliedBillId) {
+    const { data: bill } = await supabase
+      .from('bills')
+      .select('id')
+      .eq('unit_id', params.unitId)
+      .eq('billing_month', newTarget)
+      .maybeSingle()
+
+    if (bill?.id) {
+      await applyUnappliedAdvanceCreditsToBill(bill.id, params.unitId, newTarget)
+    }
+  }
+}
+
+async function deleteAdvancePaymentRecord(params: {
+  paymentId: string
+  amount: number
+  appliedBillId?: string | null
+}) {
+  if (params.appliedBillId) {
+    await adjustBillPaidAmount(params.appliedBillId, -params.amount)
+  }
+
+  const { error } = await supabase.from('advance_payments').delete().eq('id', params.paymentId)
+  if (error) throw error
+}
+
 export default function Payments() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [showSuccessAlert, setShowSuccessAlert] = useState(false)
@@ -172,7 +307,34 @@ export default function Payments() {
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'mpesa' | 'bank'>('cash')
   const [receiptFile, setReceiptFile] = useState<File | null>(null)
   const [notes, setNotes] = useState('')
+  const [editingPayment, setEditingPayment] = useState<any | null>(null)
+  const [editingAdvance, setEditingAdvance] = useState<any | null>(null)
+  const [editForm, setEditForm] = useState({
+    amount: '',
+    payment_method: 'cash' as 'cash' | 'mpesa' | 'bank',
+    payment_date: '',
+    notes: '',
+    target_month: '',
+  })
+  const [editError, setEditError] = useState<string | null>(null)
   const queryClient = useQueryClient()
+
+  const invalidatePaymentQueries = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['payments'] })
+    await queryClient.invalidateQueries({ queryKey: ['advance-payments'] })
+    await queryClient.invalidateQueries({ queryKey: ['pending-bills'] })
+    await queryClient.invalidateQueries({ queryKey: ['bills'] })
+    await queryClient.invalidateQueries({ queryKey: ['bills-for-month-units'] })
+    await queryClient.invalidateQueries({ queryKey: ['payments-by-entity'] })
+    await queryClient.invalidateQueries({ queryKey: ['arrears-report'] })
+    await queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
+    await Promise.all([
+      queryClient.refetchQueries({ queryKey: ['payments'], type: 'active' }),
+      queryClient.refetchQueries({ queryKey: ['advance-payments'], type: 'active' }),
+      queryClient.refetchQueries({ queryKey: ['pending-bills'], type: 'active' }),
+      queryClient.refetchQueries({ queryKey: ['bills'], type: 'active' }),
+    ])
+  }
 
   const { data: pendingBills, error: pendingBillsError, isLoading: pendingBillsLoading } = useQuery({
     queryKey: ['pending-bills', selectedMonth],
@@ -922,6 +1084,183 @@ export default function Payments() {
     await generateReceiptPDF({ ...payment, building_payment })
   }
 
+  const openEditPayment = (payment: any) => {
+    setEditingPayment(payment)
+    setEditingAdvance(null)
+    setEditError(null)
+    setEditForm({
+      amount: String(payment.amount ?? ''),
+      payment_method: payment.payment_method || 'cash',
+      payment_date: toDateInputValue(payment.payment_date),
+      notes: payment.notes || '',
+      target_month: '',
+    })
+  }
+
+  const openEditAdvance = (payment: any) => {
+    setEditingAdvance(payment)
+    setEditingPayment(null)
+    setEditError(null)
+    setEditForm({
+      amount: String(payment.amount ?? ''),
+      payment_method: payment.payment_method || 'cash',
+      payment_date: toDateInputValue(payment.payment_date),
+      notes: payment.notes || '',
+      target_month: billingMonthKey(payment.target_month),
+    })
+  }
+
+  const closeEditModal = () => {
+    setEditingPayment(null)
+    setEditingAdvance(null)
+    setEditError(null)
+    setEditForm({
+      amount: '',
+      payment_method: 'cash',
+      payment_date: '',
+      notes: '',
+      target_month: '',
+    })
+  }
+
+  const updatePaymentMutation = useMutation({
+    mutationFn: async () => {
+      if (!editingPayment) throw new Error('No payment selected')
+      const amount = parseFloat(editForm.amount)
+      if (!editForm.amount.trim() || Number.isNaN(amount) || amount <= 0) {
+        throw new Error('Enter a valid amount greater than zero')
+      }
+      if (!editingPayment.bill_id) throw new Error('Payment is not linked to a bill')
+
+      await updateRegularPayment({
+        paymentId: editingPayment.id,
+        billId: editingPayment.bill_id,
+        oldAmount: Number(editingPayment.amount) || 0,
+        amount,
+        paymentMethod: editForm.payment_method,
+        paymentDate: new Date(editForm.payment_date + 'T12:00:00').toISOString(),
+        notes: editForm.notes.trim() || undefined,
+      })
+    },
+    onSuccess: async () => {
+      await invalidatePaymentQueries()
+      setSuccessMessage('Payment updated successfully.')
+      setShowSuccessAlert(true)
+      setTimeout(() => setShowSuccessAlert(false), 4000)
+      closeEditModal()
+    },
+    onError: (error: unknown) => {
+      setEditError(error instanceof Error ? error.message : 'Failed to update payment')
+    },
+  })
+
+  const deletePaymentMutation = useMutation({
+    mutationFn: async (payment: any) => {
+      if (!payment?.bill_id) throw new Error('Payment is not linked to a bill')
+      await deleteRegularPayment({
+        paymentId: payment.id,
+        billId: payment.bill_id,
+        amount: Number(payment.amount) || 0,
+      })
+    },
+    onSuccess: async () => {
+      await invalidatePaymentQueries()
+      setSuccessMessage('Payment deleted and bill balance updated.')
+      setShowSuccessAlert(true)
+      setTimeout(() => setShowSuccessAlert(false), 4000)
+    },
+    onError: (error: unknown) => {
+      alert(error instanceof Error ? error.message : 'Failed to delete payment')
+    },
+  })
+
+  const updateAdvanceMutation = useMutation({
+    mutationFn: async () => {
+      if (!editingAdvance) throw new Error('No advance payment selected')
+      const amount = parseFloat(editForm.amount)
+      if (!editForm.amount.trim() || Number.isNaN(amount) || amount <= 0) {
+        throw new Error('Enter a valid amount greater than zero')
+      }
+      if (!editForm.target_month) throw new Error('Choose a target month')
+
+      await updateAdvancePaymentRecord({
+        paymentId: editingAdvance.id,
+        oldAmount: Number(editingAdvance.amount) || 0,
+        oldTargetMonth: editingAdvance.target_month,
+        appliedBillId: editingAdvance.applied_bill_id,
+        unitId: editingAdvance.unit_id,
+        amount,
+        paymentMethod: editForm.payment_method,
+        paymentDate: new Date(editForm.payment_date + 'T12:00:00').toISOString(),
+        notes: editForm.notes.trim() || undefined,
+        targetMonth: `${editForm.target_month}-01`,
+      })
+    },
+    onSuccess: async () => {
+      await invalidatePaymentQueries()
+      setSuccessMessage('Advance payment updated successfully.')
+      setShowSuccessAlert(true)
+      setTimeout(() => setShowSuccessAlert(false), 4000)
+      closeEditModal()
+    },
+    onError: (error: unknown) => {
+      setEditError(error instanceof Error ? error.message : 'Failed to update advance payment')
+    },
+  })
+
+  const deleteAdvanceMutation = useMutation({
+    mutationFn: async (payment: any) => {
+      await deleteAdvancePaymentRecord({
+        paymentId: payment.id,
+        amount: Number(payment.amount) || 0,
+        appliedBillId: payment.applied_bill_id,
+      })
+    },
+    onSuccess: async () => {
+      await invalidatePaymentQueries()
+      setSuccessMessage('Advance payment deleted and bill balance updated.')
+      setShowSuccessAlert(true)
+      setTimeout(() => setShowSuccessAlert(false), 4000)
+    },
+    onError: (error: unknown) => {
+      alert(error instanceof Error ? error.message : 'Failed to delete advance payment')
+    },
+  })
+
+  const handleSaveEditPayment = (e: FormEvent) => {
+    e.preventDefault()
+    setEditError(null)
+    if (editingPayment) updatePaymentMutation.mutate()
+    else if (editingAdvance) updateAdvanceMutation.mutate()
+  }
+
+  const handleDeletePayment = (payment: any) => {
+    const label = payment.tenants?.name || payment.units?.unit_number || 'this payment'
+    if (
+      !window.confirm(
+        `Delete payment of ${formatCurrency(payment.amount)} for ${label}? The bill balance will be updated.`
+      )
+    ) {
+      return
+    }
+    deletePaymentMutation.mutate(payment)
+  }
+
+  const handleDeleteAdvance = (payment: any) => {
+    const label = payment.tenant_name || payment.unit_number || 'this advance'
+    const appliedNote = payment.applied_bill_id
+      ? ' The credit will be removed from the applied bill.'
+      : ''
+    if (
+      !window.confirm(
+        `Delete advance payment of ${formatCurrency(payment.amount)} for ${label}?${appliedNote}`
+      )
+    ) {
+      return
+    }
+    deleteAdvanceMutation.mutate(payment)
+  }
+
   const closeModal = () => {
     setIsModalOpen(false)
     resetForm()
@@ -1106,7 +1445,7 @@ export default function Payments() {
               <th className="w-[80px] sm:w-[100px]">Amount</th>
               <th className="w-[70px] sm:w-[90px]">Method</th>
               <th className="w-[60px] sm:w-[80px]">Receipt</th>
-              <th className="w-[90px] sm:w-[100px]">Actions</th>
+              <th className="w-[120px] sm:w-[140px]">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -1153,13 +1492,33 @@ export default function Payments() {
                     )}
                   </td>
                   <td>
-                    <button
-                      onClick={() => handleDownloadReceipt(payment)}
-                      className="p-2 text-gray-600 hover:text-primary-600 hover:bg-gray-100 rounded"
-                      title="Download Receipt"
-                    >
-                      <Download size={18} />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => openEditPayment(payment)}
+                        className="p-2 text-gray-600 hover:text-primary-600 hover:bg-gray-100 rounded"
+                        title="Edit payment"
+                      >
+                        <Edit size={18} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePayment(payment)}
+                        className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded"
+                        title="Delete payment"
+                        disabled={deletePaymentMutation.isPending}
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadReceipt(payment)}
+                        className="p-2 text-gray-600 hover:text-primary-600 hover:bg-gray-100 rounded"
+                        title="Download Receipt"
+                      >
+                        <Download size={18} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))
@@ -1229,12 +1588,13 @@ export default function Payments() {
               <th className="w-[110px] sm:w-[140px]">Target month</th>
               <th className="w-[80px] sm:w-[100px]">Status</th>
               <th className="w-[100px] sm:w-[120px]">Applied bill</th>
+              <th className="w-[90px] sm:w-[100px]">Actions</th>
             </tr>
           </thead>
           <tbody>
             {advancePaymentsError && (
               <tr>
-                <td colSpan={8} className="p-4 text-center">
+                <td colSpan={9} className="p-4 text-center">
                   <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
                     <p className="text-sm font-semibold text-red-900 mb-1">Error loading advance credits</p>
                     <p className="text-sm text-red-700">
@@ -1246,7 +1606,7 @@ export default function Payments() {
             )}
             {advancePaymentsLoading ? (
               <tr>
-                <td colSpan={8} className="p-4 text-center">
+                <td colSpan={9} className="p-4 text-center">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
                   <p className="mt-2 text-slate-600">Loading advance credits...</p>
                 </td>
@@ -1272,11 +1632,32 @@ export default function Payments() {
                       <span className="text-gray-400">N/A</span>
                     )}
                   </td>
+                  <td>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => openEditAdvance(payment)}
+                        className="p-2 text-gray-600 hover:text-primary-600 hover:bg-gray-100 rounded"
+                        title="Edit advance payment"
+                      >
+                        <Edit size={18} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteAdvance(payment)}
+                        className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded"
+                        title="Delete advance payment"
+                        disabled={deleteAdvanceMutation.isPending}
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={8} className="p-8 text-center">
+                <td colSpan={9} className="p-8 text-center">
                   <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
                     <DollarSign className="text-slate-400" size={24} />
                   </div>
@@ -1505,6 +1886,127 @@ export default function Payments() {
                     ) : (
                       'Record payment(s)'
                     )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {(editingPayment || editingAdvance) && (
+        <div className="modal-overlay" onClick={closeEditModal}>
+          <div className="modal-content max-w-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6">
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">
+                    {editingPayment ? 'Edit Payment' : 'Edit Advance Payment'}
+                  </h2>
+                  <p className="text-sm text-slate-500 mt-1">
+                    {editingPayment
+                      ? `${editingPayment.tenants?.name || 'Tenant'} · Unit ${editingPayment.units?.unit_number || '?'}`
+                      : `${editingAdvance?.tenant_name || 'Tenant'} · Unit ${editingAdvance?.unit_number || '?'}`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeEditModal}
+                  className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {editError && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+                  {editError}
+                </div>
+              )}
+
+              <form onSubmit={handleSaveEditPayment} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Amount (KES)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={editForm.amount}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, amount: e.target.value }))}
+                    className="input"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Payment method</label>
+                  <select
+                    value={editForm.payment_method}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        payment_method: e.target.value as 'cash' | 'mpesa' | 'bank',
+                      }))
+                    }
+                    className="input"
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="mpesa">M-Pesa</option>
+                    <option value="bank">Bank</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Payment date</label>
+                  <input
+                    type="date"
+                    value={editForm.payment_date}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, payment_date: e.target.value }))}
+                    className="input"
+                    required
+                  />
+                </div>
+
+                {editingAdvance && (
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">Target billing month</label>
+                    <input
+                      type="month"
+                      value={editForm.target_month}
+                      onChange={(e) => setEditForm((prev) => ({ ...prev, target_month: e.target.value }))}
+                      className="input"
+                      required
+                    />
+                    {editingAdvance.applied_bill_id && (
+                      <p className="text-xs text-amber-700 mt-1">
+                        This credit is applied to a bill. Changing the amount or month will update that bill balance.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Notes (optional)</label>
+                  <textarea
+                    value={editForm.notes}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, notes: e.target.value }))}
+                    className="input"
+                    rows={3}
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button type="button" onClick={closeEditModal} className="flex-1 btn btn-secondary">
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 btn btn-primary"
+                    disabled={updatePaymentMutation.isPending || updateAdvanceMutation.isPending}
+                  >
+                    {updatePaymentMutation.isPending || updateAdvanceMutation.isPending
+                      ? 'Saving...'
+                      : 'Save changes'}
                   </button>
                 </div>
               </form>
