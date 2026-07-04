@@ -7,6 +7,7 @@ import { Plus, Download, DollarSign, CheckCircle } from 'lucide-react'
 import { generateReceiptPDF } from '@/lib/pdf'
 import { compareByBuildingThenUnit } from '@/lib/property-sort'
 import { fetchBuildingPaymentByUnitId, readGlobalPaymentSettings, resolvePaymentInstructions, buildingHasPaymentOverride } from '@/lib/payment-instructions'
+import { applyUnappliedAdvanceCreditsToBill } from '@/lib/advance-payments'
 
 function billingMonthKey(billingMonth: string): string {
   const d = new Date(billingMonth)
@@ -127,6 +128,20 @@ async function recordAdvancePayment(params: {
     .single()
 
   if (error) throw error
+
+  // If a bill already exists for the target month, apply the credit immediately
+  const targetMonth = params.targetMonth.length === 7 ? `${params.targetMonth}-01` : params.targetMonth
+  const { data: existingBill } = await supabase
+    .from('bills')
+    .select('id')
+    .eq('unit_id', params.unitId)
+    .eq('billing_month', targetMonth)
+    .maybeSingle()
+
+  if (existingBill?.id) {
+    await applyUnappliedAdvanceCreditsToBill(existingBill.id, params.unitId, targetMonth)
+  }
+
   return advancePayment
 }
 
@@ -696,6 +711,7 @@ export default function Payments() {
     },
     onSuccess: async (data) => {
       await queryClient.invalidateQueries({ queryKey: ['payments'] })
+      await queryClient.invalidateQueries({ queryKey: ['advance-payments'] })
       await queryClient.invalidateQueries({ queryKey: ['pending-bills'] })
       await queryClient.invalidateQueries({ queryKey: ['bills'] })
       await queryClient.invalidateQueries({ queryKey: ['bills-for-month-units'] })

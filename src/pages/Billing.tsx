@@ -22,6 +22,7 @@ import {
   utilityLineItemsSubtotal,
   type BillUtilityLineItem,
 } from '@/lib/recurring-utilities'
+import { reconcileAdvanceCreditsForBill, syncBillStatus as syncBillStatusShared } from '@/lib/advance-payments'
 import ExportColumnsModal from '@/components/ExportColumnsModal'
 import useToast from '@/hooks/useToast'
 import { useAuthStore } from '@/store/authStore'
@@ -198,31 +199,7 @@ export default function Billing() {
   // Helper: sync the bill status using fresh DB-calculated values
   const syncBillStatus = async (billId: string) => {
     try {
-      const { data: freshBill, error: freshError } = await supabase
-        .from('bills')
-        .select('total_amount, amount_paid, balance, status')
-        .eq('id', billId)
-        .single()
-
-      if (freshError) {
-        console.warn('Failed to fetch fresh bill for status sync:', freshError)
-        return
-      }
-
-      const total = freshBill.total_amount || 0
-      const paid = freshBill.amount_paid || 0
-      const balance = typeof freshBill.balance === 'number' ? freshBill.balance : (total - paid)
-      const EPS = 0.0001
-      const computedStatus = balance <= EPS ? 'paid' : paid > 0 ? 'partial' : 'pending'
-
-      if (computedStatus !== freshBill.status) {
-        const { error: statusErr } = await supabase
-          .from('bills')
-          .update({ status: computedStatus })
-          .eq('id', billId)
-
-        if (statusErr) console.warn('Failed to sync bill status:', statusErr)
-      }
+      await syncBillStatusShared(billId)
     } catch (err) {
       console.warn('syncBillStatus error', err)
     }
@@ -689,48 +666,6 @@ export default function Billing() {
     </div>
   )
 
-  const fetchAdvanceCreditsForMonth = async (monthStr: string) => {
-    const { data, error } = await supabase
-      .from('advance_payments')
-      .select('id, unit_id, amount')
-      .eq('target_month', monthStr)
-      .is('applied_bill_id', null)
-
-    if (error) {
-      console.error('Failed to fetch advance payments for month', monthStr, error)
-      throw error
-    }
-
-    const credits = new Map<string, { total: number; ids: string[] }>()
-    for (const row of data || []) {
-      const id = row.id
-      const unitId = row.unit_id
-      const amount = Number(row.amount || 0)
-      const existing = credits.get(unitId) || { total: 0, ids: [] }
-      existing.total += amount
-      existing.ids.push(id)
-      credits.set(unitId, existing)
-    }
-
-    return credits
-  }
-
-  const fetchAdvanceCreditForMonthAndUnit = async (monthStr: string, unitId: string) => {
-    const { data, error } = await supabase
-      .from('advance_payments')
-      .select('amount')
-      .eq('target_month', monthStr)
-      .eq('unit_id', unitId)
-      .is('applied_bill_id', null)
-
-    if (error) {
-      console.error('Failed to fetch advance credits for unit', unitId, monthStr, error)
-      throw error
-    }
-
-    return (data || []).reduce((sum: number, row: any) => sum + Number(row.amount || 0), 0)
-  }
-
   const generateBillsMutation = useMutation({
     mutationFn: async () => {
       const unitsToBill = occupiedUnitsForBuilding
@@ -773,10 +708,6 @@ export default function Billing() {
       )
 
       const monthStr = selectedMonth + '-01'
-      const advanceCredits = await fetchAdvanceCreditsForMonth(monthStr)
-      if (advanceCredits.size > 0) {
-        console.log('Advance credits found for target month:', advanceCredits)
-      }
 
       const totalArrears = Array.from(prevBalances.values()).reduce((sum, val) => sum + val, 0)
       if (totalArrears > 0) {
@@ -852,11 +783,6 @@ export default function Billing() {
         }
 
         const arrears = prevBalances.get(unit.id) || 0
-        const advanceCredit = advanceCredits.get(unit.id)?.total || 0
-
-        if (advanceCredit !== 0) {
-          console.log(`Unit ${unit.id}: Applying advance credit of ${advanceCredit} to ${monthStr}`)
-        }
 
         const patch = {
           tenant_id: unit.tenants?.id || null,
@@ -868,7 +794,7 @@ export default function Billing() {
           elec_current_reading: readings.elec_current,
           elec_rate: defaultElecRate,
           rent_amount: unit.monthly_rent || 0,
-          arrears_brought_forward: arrears - advanceCredit,
+          arrears_brought_forward: arrears,
           garbage_amount: garbageAmount,
           maintenance_amount: maintenanceAmount,
           other_utilities_amount: otherUtilitiesAmount,
@@ -907,19 +833,15 @@ export default function Billing() {
         })
       }
 
-      if (advanceCredits.size > 0) {
-        for (const [unitId, advanceCredit] of advanceCredits.entries()) {
-          const billId = billIdByUnitId.get(unitId)
-          if (!billId || advanceCredit.ids.length === 0) continue
-
-          const { error: applyErr } = await supabase
-            .from('advance_payments')
-            .update({ applied_bill_id: billId, applied_at: new Date().toISOString() })
-            .in('id', advanceCredit.ids)
-
-          if (applyErr) {
-            console.warn('Failed to mark advance payments applied for unit', unitId, applyErr)
+      // Apply advance payment credits to amount_paid (and repair legacy applications)
+      for (const [unitId, billId] of billIdByUnitId.entries()) {
+        try {
+          const credit = await reconcileAdvanceCreditsForBill(billId, unitId, monthStr)
+          if (credit > 0) {
+            console.log(`Unit ${unitId}: Applied advance credit of ${credit} to bill ${billId}`)
           }
+        } catch (err) {
+          console.warn('Failed to reconcile advance credits for unit', unitId, err)
         }
       }
 
@@ -951,6 +873,7 @@ export default function Billing() {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['bills'] })
+      await queryClient.invalidateQueries({ queryKey: ['advance-payments'] })
       await queryClient.invalidateQueries({ queryKey: ['arrears-report'] })
       await queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
       await queryClient.refetchQueries({ queryKey: ['bills'] })
@@ -1029,10 +952,14 @@ export default function Billing() {
       id,
       updates,
       lineItems,
+      unitId,
+      billingMonth,
     }: {
       id: string
       updates: any
       lineItems?: BillUtilityLineItem[]
+      unitId?: string
+      billingMonth?: string
     }) => {
       const { error } = await supabase
         .from('bills')
@@ -1042,6 +969,9 @@ export default function Billing() {
       if (error) throw error
       if (lineItems) {
         await syncUtilityBillItemsFromLineItems(id, lineItems)
+      }
+      if (unitId && billingMonth) {
+        await reconcileAdvanceCreditsForBill(id, unitId, billingMonth)
       }
       await syncBillStatus(id)
     },
@@ -1070,6 +1000,7 @@ export default function Billing() {
         other_utilities_amount: '',
         amount_paid: '',
       })
+      await queryClient.invalidateQueries({ queryKey: ['advance-payments'] })
     },
     onError: (error: any) => {
       console.error('Failed to update bill:', error)
@@ -1137,11 +1068,17 @@ export default function Billing() {
       if (error) throw error
       if (data?.id) {
         await syncUtilityBillItemsFromLineItems(data.id, lineItems)
+        await reconcileAdvanceCreditsForBill(
+          data.id,
+          billData.unit_id,
+          billData.billing_month
+        )
         await syncBillStatus(data.id)
       }
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['bills'] })
+      await queryClient.invalidateQueries({ queryKey: ['advance-payments'] })
       await queryClient.invalidateQueries({ queryKey: ['arrears-report'] })
       await queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
       await queryClient.refetchQueries({ queryKey: ['bills'] })
@@ -1314,7 +1251,13 @@ export default function Billing() {
       status: newStatus,
     }
 
-    updateBillMutation.mutate({ id: editingBill.id, updates, lineItems: utilityLineItems })
+    updateBillMutation.mutate({
+      id: editingBill.id,
+      updates,
+      lineItems: utilityLineItems,
+      unitId: editingBill.unit_id,
+      billingMonth: editingBill.billing_month,
+    })
   }
 
   const handleSaveCreateBill = async (e: React.FormEvent) => {
@@ -1373,13 +1316,19 @@ export default function Billing() {
     try {
       if (insertedBill?.id) {
         await syncUtilityBillItemsFromLineItems(insertedBill.id, utilityLineItems)
+        await reconcileAdvanceCreditsForBill(
+          insertedBill.id,
+          selectedUnitForBill,
+          selectedMonth + '-01'
+        )
         await syncBillStatus(insertedBill.id)
       }
     } catch (err) {
-      console.warn('Failed to sync utility bill items for new bill:', err)
+      console.warn('Failed to sync utility bill items / advance credits for new bill:', err)
     }
 
     await queryClient.invalidateQueries({ queryKey: ['bills'] })
+    await queryClient.invalidateQueries({ queryKey: ['advance-payments'] })
     await queryClient.invalidateQueries({ queryKey: ['arrears-report'] })
     await queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
     await queryClient.refetchQueries({ queryKey: ['bills'] })
@@ -1440,8 +1389,6 @@ export default function Billing() {
       .single()
 
     const prevBalance = prevBill ? (prevBill.total_amount - prevBill.amount_paid) : 0
-    const advanceCredit = await fetchAdvanceCreditForMonthAndUnit(selectedMonth + '-01', selectedUnitForBill)
-    const arrears = prevBalance - advanceCredit
 
     const billData = {
       unit_id: selectedUnitForBill,
@@ -1455,7 +1402,7 @@ export default function Billing() {
       elec_rate: 15,
       rent_amount: 0,
       // Allow negative prevBalance (overpayments) to be carried forward as negative arrears
-      arrears_brought_forward: arrears,
+      arrears_brought_forward: prevBalance,
       garbage_amount: garbageAmount,
       maintenance_amount: maintenanceAmount,
       other_utilities_amount: otherUtilitiesAmount,
@@ -2547,10 +2494,12 @@ export default function Billing() {
                           .eq('billing_month', prevMonthStr)
                           .single()
 
-                        const advanceCredit = await fetchAdvanceCreditForMonthAndUnit(selectedMonth + '-01', unit.id)
-                        const computedArrears = (prevBill && typeof prevBill.balance !== 'undefined' && prevBill.balance !== null ? prevBill.balance : 0) - advanceCredit
-
-                        // Preserve negative balances (overpayment) as negative arrears when present
+                        // Preserve negative balances (overpayment) as negative arrears when present.
+                        // Advance credits are applied to amount_paid on save, not deducted from arrears.
+                        const computedArrears =
+                          prevBill && typeof prevBill.balance !== 'undefined' && prevBill.balance !== null
+                            ? prevBill.balance
+                            : 0
                         newFormData.arrears_brought_forward = computedArrears.toString()
 
                         setBillFormData(newFormData)
