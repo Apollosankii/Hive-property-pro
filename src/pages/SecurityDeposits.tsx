@@ -266,8 +266,44 @@ export default function SecurityDeposits() {
         status
       })
 
+      // Meter readings live on bills, not units — persist final readings on the latest bill
+      // so the next tenant's billing picks up the correct starting point.
+      if (depositData.unit_id) {
+        const billPatch: Record<string, unknown> = {
+          updated_at: new Date().toISOString(),
+        }
+
+        if (typeof finalWaterReading === 'number' && Number.isFinite(finalWaterReading)) {
+          billPatch.water_prev_reading = finalWaterReading
+          billPatch.water_current_reading = finalWaterReading
+        }
+
+        if (typeof finalElecReading === 'number' && Number.isFinite(finalElecReading)) {
+          billPatch.elec_prev_reading = finalElecReading
+          billPatch.elec_current_reading = finalElecReading
+        }
+
+        if (Object.keys(billPatch).length > 1) {
+          const { data: latestBill } = await supabase
+            .from('bills')
+            .select('id')
+            .eq('unit_id', depositData.unit_id)
+            .order('billing_month', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+
+          if (latestBill?.id) {
+            const { error: billReadingsError } = await supabase
+              .from('bills')
+              .update(billPatch)
+              .eq('id', latestBill.id)
+
+            if (billReadingsError) throw billReadingsError
+          }
+        }
+      }
+
       // Clear all bills (mark as paid) for this tenant since deductions have been made
-      // Get all bills to set amount_paid to total_amount
       const { data: billsToUpdate } = await supabase
         .from('bills')
         .select('id, total_amount')
@@ -277,10 +313,10 @@ export default function SecurityDeposits() {
         for (const bill of billsToUpdate) {
           await supabase
             .from('bills')
-            .update({ 
+            .update({
               amount_paid: bill.total_amount,
               balance: 0,
-              status: 'paid'
+              status: 'paid',
             })
             .eq('id', bill.id)
         }
@@ -290,42 +326,16 @@ export default function SecurityDeposits() {
       const now = new Date().toISOString()
       const { error: updateError } = await supabase
         .from('security_deposits')
-        .update({ 
+        .update({
           status,
           notes: `Lease ended. ${damagesDescription || ''}`,
-          updated_at: now
+          updated_at: now,
         })
         .eq('id', depositId)
 
       if (updateError) throw updateError
-      
+
       console.log('Deposit updated:', { depositId, status, updated_at: now, refundAmount })
-
-      // Update the unit meter readings from lease-end data when provided
-      if (depositData.unit_id) {
-        const unitPatch: Record<string, unknown> = {
-          updated_at: new Date().toISOString(),
-        }
-
-        if (typeof finalWaterReading === 'number' && Number.isFinite(finalWaterReading)) {
-          unitPatch.water_prev_reading = finalWaterReading
-          unitPatch.water_current_reading = finalWaterReading
-        }
-
-        if (typeof finalElecReading === 'number' && Number.isFinite(finalElecReading)) {
-          unitPatch.elec_prev_reading = finalElecReading
-          unitPatch.elec_current_reading = finalElecReading
-        }
-
-        if (Object.keys(unitPatch).length > 1) {
-          const { error: unitReadingsError } = await supabase
-            .from('units')
-            .update(unitPatch)
-            .eq('id', depositData.unit_id)
-
-          if (unitReadingsError) throw unitReadingsError
-        }
-      }
 
       // Archive the tenant and mark the unit as vacant once lease end is processed
       const { error: tenantUpdateError } = await supabase
